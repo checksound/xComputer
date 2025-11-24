@@ -1,0 +1,2357 @@
+<!DOCTYPE html>
+<!-- saved from url=(0052)https://math.hws.edu/eck/js/xComputer/xComputer.html -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+<title>xComputer</title>
+
+<style>
+    .heading {
+       font-size: 125%;
+       color: #CC0000;
+       padding: 0;
+       margin: 5pt;
+    }
+    table.prog  {
+       background-color: #EEEEFF;
+    }
+    table {
+       background-color: #EEEEEE;
+    }
+    .wire {
+       font-size: 65%;
+       padding: 1pt;
+       margin: 1pt;
+       white-space: pre;
+    }
+    table.wiretable td, table.wiretable tr {
+       padding: 0;
+       margin: 0;
+    }
+    input {
+       background-color:white;
+       padding: 2pt;
+       color: black;
+    }
+    .label {
+       color: #0000CC;
+    }
+    span.label {
+        margin-left: 15pt;
+    }
+    #graphics {
+       display: block;
+       background-color: white;
+    }
+    #graphicsholder {
+       border: solid 1pt red;
+       margin: 10pt 5pt;
+       padding: 0;
+    }
+    textarea {
+       background-color: white;
+       color:black;
+    }
+    html, body {
+       background-color: #EEEEFF;
+    }
+    h2 {
+       padding: 0;
+       margin: 0;
+    }
+    p.mem {
+       font-family: monospace;
+       font-size: 90%;
+       padding: 1pt 2pt;
+       margin: 0pt;
+       white-space: pre;
+       color: black;
+       background-color: white;
+    }
+    span.loc {
+       color: #0000CC;
+    }
+    #memholder {
+       height: 380px;
+       background-color: white;
+       overflow-y: scroll;
+       overflow-x: hidden;
+       border: solid 1pt black;
+       padding: 4pt;
+    }
+    #mem {
+       padding: 0;
+       margin: 0;
+    }
+    #error {
+       margin-left: 20pt;
+       color: #CC0000;
+       width: 800pt;
+    }
+    input[readonly] {
+       border: none;
+    }
+   #memexportbg {
+       position: fixed;
+       z-index: 10;
+       opacity: 0.7;
+       background-color: black;
+       left: 0;
+       top: 0;
+       width: 100%;
+       height: 100%;
+       display: none;
+   }
+   #memexport {
+       position: fixed;
+       left: 100px;
+       top: 50px;
+       z-index:20;
+       padding: 10px;
+       background-color: #D8D8FF;
+       border: 2px solid #000099;
+       border-radius: 16px;
+       box-shadow: 5px 5px 8px black;
+       display: none;
+   }</style>
+
+<script>
+   
+/* programsToLoad contains a list of sample programs that are available on the web site.
+ * If this web app is loaded thruogh a URL with no search component, the programs will appear in
+ * a popup menu above the textarea that serves as a program editor in the app, and the first program
+ * will be loaded into the textarea.  If the search component in the URL is "?files=none", this
+ * behavior is surpressed.  Otherwise, in a search component has the form "?files=..." then ... must 
+ * be a relative URL to a text file containing a list of files for the popup menu. The content
+ * of the file should be a JSON object with the same form as programsToLoad.  That string
+ * will replace programsToLoad and will be treated in the same way.  If the file can't be
+ * loaded, or if its content does not have the correct form, no files will appear in the menu.
+ * The value of an array of objects.  Each object has a "name" property, which will appear
+ * in the popup menu, and a "url" property, which is a relative URL to the the file.
+ */
+   
+var programsToLoad = [  
+   { "name": "The Basics", "url": "programs/TheBasics.txt"},
+   { "name": "Multiplication Using Labels", "url": "programs/Labels.txt"},
+   { "name": "Graphical View of Memory", "url": "programs/Graphics.txt"},
+   { "name": "Three-N-plus-one Sequence", "url": "programs/Three_N_Plus_One.txt"},
+   { "name": "Using a Subroutine", "url": "programs/ListSumSubroutine.txt"},
+   { "name": "Multiplication by Subroutine", "url": "programs/MultiplicationWithSubroutine.txt"},
+   { "name": "Testing for Prime Numbers", "url": "programs/PrimeTest.txt"},
+   { "name": "Powers of Three", "url": "programs/PowersOfThree.txt"}
+];
+
+
+
+
+var buttons;
+var speed;
+var registerDisplay;
+var memDisplay;
+var graphicsCanvas;
+var g;
+var globalConverter;
+var untitledCount;
+var wires;
+var wireset; // currently selected wires
+var memory;
+var autoscroll;
+var running = false;
+var executionState = "idle";
+var frameRequest = null;
+var frameCountdown;
+var dimmed = false; // if true, minimal UI update while running
+var programs;
+var programInEditor;
+
+function ParseError(message, pos) {
+   this.message = message;
+   this.pos = pos;
+}
+
+function parse(str, parseOneInstructionOnly){
+      var buffer = "";
+      var input = str;
+      var length = str.length;
+      var pos = 0;
+      if (parseOneInstructionOnly)
+         return parseOneInstruction();
+      var data = new Uint16Array(1024);
+      var dataCt = 0;
+      var labelNames = [];
+      var unfinishedLabelData = new Int32Array(1024);
+      for (let i = 0; i < 1024; i++)
+         unfinishedLabelData[i] = -1;
+      skip();
+      if (length == pos)
+         doError("The program does not contain any assembly language instructions.");
+      while (pos < length) {
+          let ch = input.charAt(pos);
+          if ((isLetter(ch) || ch == '_') && readLabelDefinition()) {
+             skip();
+             continue;
+          }
+          if (ch == 'B' || ch == 'b')
+             addData(readLabelOrBinary(false));
+          else if (isLetter(ch) || ch == '_')
+             addData(readInstruction(true));
+          else if (isDigit(ch)) { // number or rep count
+             let n = 0;
+             while (pos < length && n < 100000 && isDigit(input.charAt(pos))) {
+                ch = input.charAt(pos);
+                n = 10*n + ((ch == '0')? 0 : ch.charCodeAt(0)-48);
+                pos++;
+             }
+             skipSpaces();
+             if (pos < length && input.charAt(pos) == '#') {
+                pos++;
+                readRepeatedValue(n);
+             }
+             else if (n > 65535)
+                doError("Integer larger than maximum permitted value of 65535.");
+             else
+                addData(n);
+          }
+          else if (ch == '+' || ch == '-')
+             addData(readInt(false));
+          else if (ch == '$')
+             addData(readHex(false));
+          else if (ch == "'")
+             addData(readAscii(false));
+          else if (ch == '\"')
+             readString();
+          else if (ch == '@') {
+             readDataCt();
+             skip();
+             continue;
+          }
+          else
+             doError("Unexpected Character ('" + ch + "') found in program.");
+          skipSpaces();
+          if (pos < length && input.charAt(pos) != ';' && input.charAt(pos) != '\r' &&
+                     input.charAt(pos) != '\n')
+             doError("Extra stuff found on line after data item. Only one item is allowed per line.");
+          skip();
+      }
+      for (let i = 0; i < labelNames.length; i++) {
+         let info = labelNames[i];
+         if (info.numericalValue < 0)
+            doError("The label \"" + info.name + "\", which was used in the program, is undefined.");
+      }
+      for (let i = 0; i < 1024; i++)
+         if (unfinishedLabelData[i] >= 0)
+            data[i] |= labelNames[unfinishedLabelData[i]].numericalValue;
+      return data;
+   
+   
+   function parseOneInstruction() {
+      skip();
+      if (pos == length)
+         doError("No Data.");
+      var n = 0;
+      if (input.charAt(pos) == 'b' || input.charAt(pos) == 'B')
+         n = readBinary(false);
+      else if (input.charAt(pos) == '$')
+         n = readHex(false);
+      else if (isDigit(input.charAt(pos)) || input.charAt(pos) == '-' || input.charAt(pos) == '+')
+         n = readInt(false);
+      else if (input.charAt(pos) == "'")
+         n = readAscii(false);
+      else if (isLetter(input.charAt(pos)))
+         n = readInstruction(false);
+      else
+         doError("Can't recognize data format.");
+      skip();
+      if (pos != length)
+         doError("Extra input after legal data value.");
+      return n;
+   }
+   
+   function doError(message){
+      throw new ParseError(message,pos);
+   }
+   
+   function skipSpaces() {
+      while (pos < length && (input.charAt(pos) == ' ' || input.charAt(pos) == '\t'))
+         pos++;
+   }
+
+   function skip() {
+      while (pos < length && (input.charAt(pos) == ' ' ||
+              input.charAt(pos) == '\r' || input.charAt(pos) == '\n' ||
+              input.charAt(pos) == '\t' || input.charAt(pos) == ';')) {
+         if (input.charAt(pos) == ';') 
+            do {
+               pos++;
+            } while (pos < length && input.charAt(pos) != '\r' && input.charAt(pos) != '\n');
+         else
+            pos++;
+      }
+   }
+   
+   function readWord() {  // assumes next char is a letter or underscore
+      buffer = "";
+      while (pos < length && (isLetter(input.charAt(pos)) || isDigit(input.charAt(pos)) || input.charAt(pos) == '_')) {
+         buffer += input.charAt(pos);
+         pos++;
+      }
+      return buffer.toUpperCase();
+   }
+   
+   function readHex(TenBit) {   // assumes next char is a $
+      pos++;
+      let n = 0;
+      let found = false;
+      while (pos < length && n < 100000 &&
+                (isDigit(input.charAt(pos)) ||
+                    (input.charAt(pos) >= 'a' && input.charAt(pos) <= 'f') ||
+                         (input.charAt(pos) >= 'A' && input.charAt(pos) <= 'F'))) {
+         let ch = input.charAt(pos);
+         if (isDigit(ch))
+            n = 16*n + ((ch == '0')? 0 : ch.charCodeAt(0)-48);
+         else if (ch >= 'a' && ch <= 'f')
+            n = 16*n + ch.charCodeAt(0)-87;
+         else
+            n = 16*n + ch.charCodeAt(0)-55;
+         pos++;
+         found = true;
+      }
+      if (!found)
+         doError("Illegal hexadecimal number; no digits found after '$'.");
+      if (TenBit) {
+         if (n > 1023)
+            doError("Hexadecimal number larger than maximum legal value of $3FF used as instruction data.");
+      }
+      else {
+         if (n > 0xFFFF)
+            doError("Hexadecimal number larger than maximum permitted value of $FFFF.");
+      }
+      return n;
+   }
+   
+   function readInt(TenBit) {   // assumes next char is a digit or '-' or '+'
+      let neg = false;
+      if (input.charAt(pos) == '+' || input.charAt(pos) == '-') {
+         neg = (input.charAt(pos) == '-');
+         if (neg && TenBit)
+            doError("Negative numbers not allowed as data for instructions; value must be between 0 ans 1023.");
+         pos++;
+         if (pos == length || !isDigit(input.charAt(pos)))
+            doError("Illegal number; no digits found after '" + input.charAt(pos-1) + "'.");
+      }
+      let n = 0;
+      while (pos < length && n < 100000 && isDigit(input.charAt(pos))) {
+         n = 10*n + ((input.charAt(pos) == '0')? 0 : input.charAt(pos).charCodeAt(0)-48);
+         pos++;
+      }
+      if (neg)
+         n = -n;
+      if (TenBit) {
+         if (n >1023)
+            doError("Integer larger than maximum legal value of 1023 used as instruction data.");
+      }
+      else {
+         if (n > 65535)
+            doError("Integer larger than maximum permitted value of 65535.");
+         if (n < -32768)
+            doError("Integer less than the mimimum permitted value of -32768.");
+      }
+      return n;
+   }
+   
+   function readBinary(TenBit) {  // assumes next char is a 'b' or 'B'
+      pos++;
+      let n = 0;
+      let found = false;
+      while (pos < length && (input.charAt(pos) == '0' || input.charAt(pos) == '1')) {
+         n = 2*n + ((input.charAt(pos) == '0')? 0 : 1);
+         pos++;
+         found = true;
+      }
+      if (!found)
+         doError("No digits provided in binary number.");
+      if (TenBit) {
+         if (n >1023)
+            doError("Binary number with value larger than 1023 used as instruction data.");
+      }
+      else {
+         if (n > 65535)
+            doError("Binary number with value larger than maximum permitted value of 65535.");
+      }
+      return n;
+   }
+   
+   function readAscii(TenBit) { // assumes next char is a '
+      pos++;
+      if (pos == length || input.charAt(pos) == '\n' || input.charAt(pos) == '\r')
+         doError("Illegal ASCII value; no characters found on line after the \"'\".");
+      let n = input.charAt(pos++).charCodeAt(0);
+      if (n < 32 || n > 127)
+         doError("Illegal ASCII value; only printable ASCII characters are allowed.");
+      if (TenBit)
+         return n;
+      if (pos < length && input.charAt(pos) != '\n' && input.charAt(pos) != '\r') {
+         let m = input.charAt(pos++).charCodeAt(0);
+         if (m < 32 || m > 127)
+            doError("Illegal ASCII value; only printable ASCII characters are allowed.");
+         n = 256*n + m;
+      }
+      return n;
+   }
+   
+   function readLabelOrBinary(TenBit) {  // assumes next char is a letter or underscore
+     let data = 0;
+     let savePos = pos;
+     let label = readWord();
+     let binary = true;
+     if (label.charAt(0) != 'b' && label.charAt(0) != 'B')
+        binary = false;
+     else if (label.length == 1)
+        binary = false;
+     else {
+        for (let j = 1; j < label.length; j++)
+           if (label.charAt(j) != '0' && label.charAt(j) != '1') {
+              binary = false;
+              break;
+           }
+     }
+     if (binary) {
+        pos = savePos;
+        data = readBinary(TenBit);
+     }
+     else if (label == "DATA") {
+        if (TenBit)
+           doError("The word \"DATA\" has a special meaning.  It cannot be used as a label.");
+        else 
+           return getValueForData();
+     }
+     else {
+        let infoLoc = findLabel(label);
+        if (infoLoc == -1) {
+           let info = {};
+           info.name = label;
+           info.numericalValue = -1;
+           labelNames.push(info);
+           if (dataCt <= 1023)
+              unfinishedLabelData[dataCt] = labelNames.length - 1;
+        }
+        else {
+           if (labelNames[infoLoc].numericalValue >= 0)
+              data = labelNames[infoLoc].numericalValue;
+           else if (dataCt < 1024)
+              unfinishedLabelData[dataCt] = infoLoc;
+        }
+     }
+     return data;  // this is zero if it's an undefined label
+   }
+   
+   function readInstruction(doingProgram) {  // assumes next char is a letter
+      let ins = readWord();
+      let insNum = -1;
+      if (ins.length == 3) {
+         for (let i = 0; i < 16; i++)
+            if (ins == Globals.InstructionName[i]) {
+               insNum = i;
+               break;
+            }
+      }
+      else if (ins == "OR")
+         insNum = Globals._or;
+      if (insNum == -1) {        
+         if (!doingProgram)
+            doError("Unknown Instruction, \"" + ins + "\".");
+         else {
+            if (ins == "DATA")
+               return getValueForData();
+            skipSpaces();
+            if (pos < length && input.charAt(pos) != ';' &&
+                        input.charAt(pos) != '\n' && input.charAt(pos) != '\r')
+                doError("Extra stuff found on line.  (Possibly due to an unrecognized instruction name or a missing ':' after a label name.)");
+            let loc = findLabel(ins);
+            if (loc == -1) {
+               let info = {};
+               info.name = ins;
+               info.numericalValue = -1;
+               labelNames.push(info);
+               if (dataCt < 1024)
+                   unfinishedLabelData[dataCt] = labelNames.length - 1;
+               return 0;
+            }
+            else {
+               if (labelNames[loc].numericalValue == -1) {
+                  if (dataCt < 1024)
+                     unfinishedLabelData[dataCt] = loc;
+                  return 0;
+               }
+               else
+                  return labelNames[loc].numericalValue;
+            }
+         }
+      }
+      let requiresData = Globals.hasData.get(insNum);
+      let n = insNum << 10;
+      if (pos < length && input.charAt(pos) == '-') {
+         pos++;
+         if (pos == length)
+            doError("Missing mode specification for \"" + ins + "-\".");
+         let mode = input.charAt(pos);
+         if (mode == '?') {
+            if (!doingProgram)
+               doError("Illegal Mode.");
+            n |= 0xC000;
+         }
+         else if (mode == 'c' || mode == 'C') {
+            if (!doingProgram && !Globals.hasConstantMode.get(insNum))
+               doError("Illegal Mode.");
+            n |= 0x4000;
+         }
+         else if (mode == 'i' || mode == 'I') {
+            if (!doingProgram && !Globals.hasIndirectMode.get(insNum))
+               doError("Illegal Mode.");
+            n |= 0x8000;
+         }
+         else
+            doError("Illegal mode specification for \"" + ins + "-\".  The mode must be C, I, or ?.");
+         pos++;
+      }
+      skipSpaces();
+      let data = 0;
+      if (pos == length && requiresData)
+         doError("Missing data for instruction (\"" + ins + "\") that requires data.");
+      if (pos == length)
+         data = 0;
+      else if (doingProgram && (isLetter(input.charAt(pos)) || input.charAt(pos) == '_'))
+         data = readLabelOrBinary(true);
+      else if (input.charAt(pos) == '$')
+         data = readHex(true);
+      else if (input.charAt(pos) == "'")
+         data = readAscii(true);
+      else if (input.charAt(pos) == 'b' || input.charAt(pos) == 'B')
+         data = readBinary(true);
+      else if (input.charAt(pos) == '+' || isDigit(input.charAt(pos)))
+         data = readInt(true);
+      else if (requiresData)
+         doError("Missing data for instruction (\"" + ins + "\") that requires data.");
+      skipSpaces();
+      if (pos < length && input.charAt(pos) != ';' &&
+                input.charAt(pos) != '\r' && input.charAt(pos) != '\n')
+          doError("Extra stuff found on line after a legal instruction.");
+      return (n | data);
+   }
+   
+   function findLabel(name) {
+      for (let i = 0; i < labelNames.length; i++)
+         if ( labelNames[i].name == name )
+            return i;
+      return -1;
+   }
+   
+   function getValueForData() {
+      skipSpaces();
+      if (pos == length)
+         return 0;
+      else if ((isDigit(input.charAt(pos)) ||
+                         input.charAt(pos) == '-' || input.charAt(pos) == '+'))
+          return readInt(false);
+      else if (input.charAt(pos) == '$')
+          return readHex(false);
+      else if (input.charAt(pos) == "'")
+          return readAscii(false);
+      else if (input.charAt(pos) == 'b' || input.charAt(pos) == 'B')
+          return readBinary(false);
+      else
+          return 0;
+   }
+
+   function readLabelDefinition() {
+     let savePos = pos;
+     let name = readWord();
+     skipSpaces();
+     if (pos < length && input.charAt(pos) == ':') {
+        if (name == "DATA")
+           doError("The word \"DATA\" has a special meaning and cannot be redefined as a label.");
+        pos++;
+        let i = findLabel(name);
+        if (i >= 0) {
+           if (labelNames[i].numericalValue < 0)
+              labelNames[i].numericalValue = dataCt;
+           else
+             doError("A second definition was found for a label, \"" + name + "\", which was already defined earlier in the program");
+        }
+        else {
+           let binary = true;
+           if (name.charAt(0) != 'B' && name.charAt(0) != 'b')
+              binary = false;
+           else if (name.length == 1)
+              binary = false;
+           else {
+              for (let j = 1; j < name.length; j++)
+                 if (name.charAt(j) != '0' && name.charAt(j) != '1') {
+                    binary = false;
+                    break;
+                 }
+           }
+           if (binary)
+              doError("The binary number \"" + name + "\" cannot be used as a label.");
+           let info = {};
+           info.name = name;
+           info.numericalValue = dataCt;
+           labelNames.push(info);
+        }
+        return true;
+     }
+     else {
+        pos = savePos;
+        return false;
+     }
+   }
+   
+   function readString() {
+      pos++;
+      while (true) {
+        if (pos < length && input.charAt(pos) == '"') {
+           pos++;
+           if (pos < length && input.charAt(pos) == '"') {
+              addData('"'.charCodeAt(0));
+              pos++;
+           }
+           else
+              return;
+        }
+        if (pos == length || input.charAt(pos) == '\n' || input.charAt(pos) == '\r')
+           doError("Line ended inside a string.  (Strings cannot extend past and end-of-line.)");
+        let n = input.charAt(pos).charCodeAt(0);
+        if (n < 32 || n > 127)
+           doError("Only printable ASCII characters are allowed in strings.");
+        addData(n);
+        pos++;
+     }
+   }
+   
+   function readDataCt() {
+     pos++;
+     skipSpaces();
+     if (pos == length || !isDigit(input.charAt(pos)))
+        doError("Missing location number for '@' directive.");
+     let n = 0;
+     while (pos < length && n < 10000 && isDigit(input.charAt(pos))) {
+        n = 10*n + ((input.charAt(pos) == '0')? 0 : input.charAt(pos).charCodeAt(0)-48);
+        pos++;
+     }
+     if (n > 1023)
+        doError("Illegal value in '@' directive; value must be between 0 and 1023.");
+     dataCt = n;
+   }
+   
+   function readRepeatedValue(repCount) {
+      if (repCount > 1024 || repCount <= 0)
+         doError("Illegal repetition count, " + repCount + ".");
+      let saveDataCt = dataCt;
+      let data  = 0;
+      skip();
+      let ch = input.charAt(pos);
+      if (ch == 'B' || ch == 'b') {
+         data = readLabelOrBinary(false);
+         skipSpaces();
+         if (pos < length && input.charAt(pos) == ':')
+            doError("It is not legal to have a labeled value after a repetition count.");
+      }
+      else if (isLetter(ch) || ch == '_')
+         data = readInstruction(true);
+      else if (isDigit(ch) || ch == '+' || ch == '-') {
+         data = readInt(false);
+         skipSpaces();
+         if (pos < length && input.charAt(pos) == '#')
+            doError("It is not legal to have two repetition directives in a row, without a value between them.");
+      }
+      else if (ch == '$')
+         data = readHex(false);
+      else if (ch == "'")
+         data = readAscii(false);
+      else
+         doError("Unexpected character ('" + ch + "') found after '#' while looking for the value for a repitition directive.");
+      for (let i = 0; i < repCount; i++)
+         addData(data);
+      if (unfinishedLabelData[saveDataCt] != 0xFFFF)
+         for (let i = 1; i < repCount; i++)
+            unfinishedLabelData[saveDataCt+i] = unfinishedLabelData[saveDataCt];
+   }
+   
+   function isDigit(ch) {
+      return ch >= '0' && ch <= '9';
+   }
+   
+   function isLetter(ch) { 
+       return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+   }
+   
+   function addData(val) {
+      if (dataCt >= 1024)
+         doError("Attempt to store into non-existant memory location (location no. " + dataCt + ")");
+      data[dataCt] = val;
+      dataCt++;
+   }
+      
+}  // end Parse()
+
+
+function Converter(d) {
+   this.data = new Uint16Array(1); // one 16-bit integer
+   if (d)
+      this.data[0] = d;
+}
+Converter.prototype.set = function(d) {
+      this.data[0] = d;
+};
+Converter.prototype.getSigned = function() {
+   if ((this.data[0] & 0x8000) == 0)
+      return this.data[0];
+   else
+      return this.data[0] - 0x10000;
+};
+Converter.prototype.getUnsigned = function() {
+   return this.data[0];
+};
+Converter.prototype.getAscii = function() {
+   var ch1 = (this.data[0] >> 8) & 0xFF;
+   var ch2 = (this.data[0] & 0xFF);
+   var s1,s2;
+   if (ch1 <= 32 || ch1 > 127)
+      s1 = "<#" + ch1 + ">";
+   else
+      s1 = String.fromCharCode(ch1);
+   if (ch2 <= 32 || ch2 > 127)
+      s2 = "<#" + ch2 + ">";
+   else
+      s2 = String.fromCharCode(ch2);
+   return s1 + s2;
+};
+Converter.prototype.getMode = function() {
+   return (this.data[0] >> 14) & 0x3;
+};
+Converter.prototype.getData = function() {
+   return this.data[0] & 0x3FF;
+};
+Converter.prototype.getInstruction = function() {
+   return (this.data[0] >> 10) & 15;
+};
+Converter.prototype.getAssembly = function() {
+   var i = this.getInstruction();
+   var d;
+   switch (this.getMode()) {
+      case Globals.direct:
+         d = this.getData();
+         if (d != 0 || Globals.hasData.get(i))
+            return Globals.InstructionName[i] + " " + d;
+         else
+            return Globals.InstructionName[i];
+      case Globals.indirect:
+         return Globals.InstructionName[i] + "-I " + this.getData();
+      case Globals.constant:
+         return Globals.InstructionName[i] + "-C " + this.getData();
+      case Globals.illegal:
+         return Globals.InstructionName[i] + "-? " + this.getData();
+      default:
+         return null;
+   }
+};
+
+
+function BitSet() {
+   this.data = new Uint32Array(1);
+}
+BitSet.prototype.get = function(index) {
+   return (this.data[0] >> index) & 0x1;
+};
+BitSet.prototype.set = function(index) {
+   this.data[0] = this.data[0] | 0x1 << index;
+};
+BitSet.prototype.unset = function(index) {
+   this.data[0] = this.data[0] & ~(0x1 << index);
+};
+BitSet.none = new BitSet();
+BitSet.setCountToZero = new BitSet();
+BitSet.setCountToZero.set(24);
+
+
+const Globals = {
+
+   _x : 0, _y : 1, _flag : 2, _ac : 3,          // registers
+   _count : 4, _ir : 5, _pc : 6, _addr : 7,
+
+   _add : 0, _sub : 1, _and : 2, _or : 3,      // instructions
+   _not : 4, _shl : 5, _shr : 6, _inc : 7,
+   _dec : 8, _lod : 9, _sto : 10, _hlt : 11,
+   _jmp : 12, _jmz : 13, _jmn : 14, _jmf : 15,
+                 
+   select_add : 0, select_subtract : 1, select_and : 2,    // control wires
+   select_or : 3, select_not : 4, select_shift_left : 5, select_shift_right : 6,
+   load_data_into_memory : 7, load_x_from_ac : 8, load_y_from_memory : 9, load_y_from_ir : 10,
+   load_ac_from_alu : 11, load_ac_from_memory : 12, load_ac_from_ir : 13, increment_ac : 14,
+   decrement_ac : 15, load_flag_from_alu : 16, load_pc_from_memory : 17, load_pc_from_ir : 18,
+   increment_pc : 19, load_ir_from_memory : 20, load_addr_from_ir : 21, load_addr_from_y : 22,
+   load_addr_from_pc : 23, set_count_to_zero : 24, stop_clock : 25,
+
+   direct : 0, constant : 1, indirect : 2, illegal : 3,   // address modes
+   
+
+   InstructionName : [  "ADD", "SUB", "AND", "OR",
+                        "NOT", "SHL", "SHR", "INC",
+                        "DEC", "LOD", "STO", "HLT",
+                        "JMP", "JMZ", "JMN", "JMF" ],
+
+
+
+   WireName : [
+      "Select-Add", "Select-Subtract", "Select-AND",
+      "Select-OR", "Select-NOT", "Select-Shift-Left", "Select-Shift-Right",
+      "Load-Data-Into-Memory", "Load-X-From-AC", "Load-Y-From-Memory", "Load-Y-From-IR",
+      "Load-AC-From-ALU", "Load-AC-From-Memory", "Load-AC-From-IR", "Increment-AC",
+      "Decrement-AC", "Load-Flag-From-ALU", "Load-PC-From-Memory", "Load-PC-From-IR",
+      "Increment-PC", "Load-IR-From-Memory", "Load-ADDR-From-IR", "Load-ADDR-From-Y",
+      "Load-ADDR-From-PC", "Set-COUNT-To-Zero", "Stop-Clock" ],
+      
+   hasConstantMode: null, hasIndirectMode: null, hasData: null, step: null
+};
+     
+{ // initialize Globals
+   Globals.hasConstantMode = new BitSet();
+   Globals.hasConstantMode.set(Globals._add);
+   Globals.hasConstantMode.set(Globals._sub);
+   Globals.hasConstantMode.set(Globals._and);
+   Globals.hasConstantMode.set(Globals._or);
+   Globals.hasConstantMode.set(Globals._lod);
+   
+   Globals.hasIndirectMode = new BitSet();
+   Globals.hasIndirectMode.set(Globals._add);
+   Globals.hasIndirectMode.set(Globals._sub);
+   Globals.hasIndirectMode.set(Globals._and);
+   Globals.hasIndirectMode.set(Globals._or);
+   Globals.hasIndirectMode.set(Globals._lod);
+   Globals.hasIndirectMode.set(Globals._sto);
+   Globals.hasIndirectMode.set(Globals._jmp);
+   Globals.hasIndirectMode.set(Globals._jmz);
+   Globals.hasIndirectMode.set(Globals._jmn);
+   Globals.hasIndirectMode.set(Globals._jmf);
+   
+   Globals.hasData = Globals.hasIndirectMode;
+   
+   Globals.step = new Array(16);
+   for (let i = 0; i < 16; i++) {
+      Globals.step[i] = new Array(4);
+      for (let j = 0; j < 4; j++) {
+         Globals.step[i][j] = new Array(11);
+      }
+   }
+   let b0 = new BitSet();
+   let b1 = new BitSet();
+   b1.set(Globals.load_addr_from_pc);
+   let b2 = new BitSet();
+   b2.set(Globals.load_ir_from_memory);
+   let b3 = new BitSet();
+   b3.set(Globals.increment_pc);
+   for (let i = Globals._add; i <= Globals._jmp; i++)
+     for (let j = 0; j < 4; j++) {
+        Globals.step[i][j][0] = b0;
+        Globals.step[i][j][1] = b1;
+        Globals.step[i][j][2] = b2;
+        Globals.step[i][j][3] = b3; 
+     }
+   for (let i = Globals._add; i <= Globals._jmp; i++)
+     for (let j = 0; j < 4; j++)
+       for (let k = 4; k < 11; k++)
+           Globals.step[i][j][k] = new BitSet();
+  Globals.step[Globals._add][Globals.direct][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._add][Globals.direct][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._add][Globals.direct][5].set(Globals.load_x_from_ac);
+  Globals.step[Globals._add][Globals.direct][6].set(Globals.select_add);
+  Globals.step[Globals._add][Globals.direct][6].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._add][Globals.direct][6].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._add][Globals.direct][7].set(Globals.select_add);
+  Globals.step[Globals._add][Globals.constant][4].set(Globals.load_y_from_ir);
+  Globals.step[Globals._add][Globals.constant][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._add][Globals.constant][5].set(Globals.select_add);
+  Globals.step[Globals._add][Globals.constant][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._add][Globals.constant][5].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._add][Globals.constant][6].set(Globals.select_add);
+  Globals.step[Globals._add][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._add][Globals.indirect][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._add][Globals.indirect][6].set(Globals.load_addr_from_y);
+  Globals.step[Globals._add][Globals.indirect][7].set(Globals.load_y_from_memory);
+  Globals.step[Globals._add][Globals.indirect][7].set(Globals.load_x_from_ac);
+  Globals.step[Globals._add][Globals.indirect][8].set(Globals.select_add);
+  Globals.step[Globals._add][Globals.indirect][8].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._add][Globals.indirect][8].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._add][Globals.indirect][9].set(Globals.select_add);
+
+  Globals.step[Globals._sub][Globals.direct][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._sub][Globals.direct][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._sub][Globals.direct][5].set(Globals.load_x_from_ac);
+  Globals.step[Globals._sub][Globals.direct][6].set(Globals.select_subtract);
+  Globals.step[Globals._sub][Globals.direct][6].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._sub][Globals.direct][6].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._sub][Globals.direct][7].set(Globals.select_subtract);
+  Globals.step[Globals._sub][Globals.constant][4].set(Globals.load_y_from_ir);
+  Globals.step[Globals._sub][Globals.constant][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._sub][Globals.constant][5].set(Globals.select_subtract);
+  Globals.step[Globals._sub][Globals.constant][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._sub][Globals.constant][5].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._sub][Globals.constant][6].set(Globals.select_subtract);
+  Globals.step[Globals._sub][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._sub][Globals.indirect][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._sub][Globals.indirect][6].set(Globals.load_addr_from_y);
+  Globals.step[Globals._sub][Globals.indirect][7].set(Globals.load_y_from_memory);
+  Globals.step[Globals._sub][Globals.indirect][7].set(Globals.load_x_from_ac);
+  Globals.step[Globals._sub][Globals.indirect][8].set(Globals.select_subtract);
+  Globals.step[Globals._sub][Globals.indirect][8].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._sub][Globals.indirect][8].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._sub][Globals.indirect][9].set(Globals.select_subtract);
+
+  Globals.step[Globals._and][Globals.direct][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._and][Globals.direct][5].set(Globals.load_x_from_ac);
+  Globals.step[Globals._and][Globals.direct][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._and][Globals.direct][6].set(Globals.select_and);
+  Globals.step[Globals._and][Globals.direct][6].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._and][Globals.direct][7].set(Globals.select_and);
+  Globals.step[Globals._and][Globals.constant][4].set(Globals.load_y_from_ir);
+  Globals.step[Globals._and][Globals.constant][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._and][Globals.constant][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._and][Globals.constant][5].set(Globals.select_and);
+  Globals.step[Globals._and][Globals.constant][6].set(Globals.select_and);
+  Globals.step[Globals._and][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._and][Globals.indirect][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._and][Globals.indirect][6].set(Globals.load_addr_from_y);
+  Globals.step[Globals._and][Globals.indirect][7].set(Globals.load_x_from_ac);
+  Globals.step[Globals._and][Globals.indirect][7].set(Globals.load_y_from_memory);
+  Globals.step[Globals._and][Globals.indirect][8].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._and][Globals.indirect][8].set(Globals.select_and);
+  Globals.step[Globals._and][Globals.indirect][9].set(Globals.select_and);
+
+  Globals.step[Globals._or][Globals.direct][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._or][Globals.direct][5].set(Globals.load_x_from_ac);
+  Globals.step[Globals._or][Globals.direct][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._or][Globals.direct][6].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._or][Globals.direct][6].set(Globals.select_or);
+  Globals.step[Globals._or][Globals.direct][7].set(Globals.select_or);
+  Globals.step[Globals._or][Globals.constant][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._or][Globals.constant][4].set(Globals.load_y_from_ir);
+  Globals.step[Globals._or][Globals.constant][5].set(Globals.select_or);
+  Globals.step[Globals._or][Globals.constant][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._or][Globals.constant][6].set(Globals.select_or);
+  Globals.step[Globals._or][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._or][Globals.indirect][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._or][Globals.indirect][6].set(Globals.load_addr_from_y);
+  Globals.step[Globals._or][Globals.indirect][7].set(Globals.load_y_from_memory);
+  Globals.step[Globals._or][Globals.indirect][7].set(Globals.load_x_from_ac);
+  Globals.step[Globals._or][Globals.indirect][8].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._or][Globals.indirect][8].set(Globals.select_or);
+  Globals.step[Globals._or][Globals.indirect][9].set(Globals.select_or);
+
+  Globals.step[Globals._shl][Globals.direct][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._shl][Globals.direct][5].set(Globals.select_shift_left);
+  Globals.step[Globals._shl][Globals.direct][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._shl][Globals.direct][5].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._shl][Globals.direct][6].set(Globals.select_shift_left);
+
+  Globals.step[Globals._shr][Globals.direct][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._shr][Globals.direct][5].set(Globals.select_shift_right);
+  Globals.step[Globals._shr][Globals.direct][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._shr][Globals.direct][5].set(Globals.load_flag_from_alu);
+  Globals.step[Globals._shr][Globals.direct][6].set(Globals.select_shift_right);
+
+  Globals.step[Globals._not][Globals.direct][4].set(Globals.load_x_from_ac);
+  Globals.step[Globals._not][Globals.direct][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._not][Globals.direct][5].set(Globals.load_ac_from_alu);
+  Globals.step[Globals._not][Globals.direct][6].set(Globals.select_not);
+
+  Globals.step[Globals._inc][Globals.direct][4].set(Globals.increment_ac);
+
+  Globals.step[Globals._dec][Globals.direct][4].set(Globals.decrement_ac);
+
+  Globals.step[Globals._lod][Globals.direct][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._lod][Globals.direct][5].set(Globals.load_ac_from_memory);
+  Globals.step[Globals._lod][Globals.constant][4].set(Globals.load_ac_from_ir);
+  Globals.step[Globals._lod][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._lod][Globals.indirect][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._lod][Globals.indirect][6].set(Globals.load_addr_from_y);
+  Globals.step[Globals._lod][Globals.indirect][7].set(Globals.load_ac_from_memory);
+
+  Globals.step[Globals._sto][Globals.direct][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._sto][Globals.direct][5].set(Globals.load_data_into_memory);
+  Globals.step[Globals._sto][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._sto][Globals.indirect][5].set(Globals.load_y_from_memory);
+  Globals.step[Globals._sto][Globals.indirect][6].set(Globals.load_addr_from_y);
+  Globals.step[Globals._sto][Globals.indirect][7].set(Globals.load_data_into_memory);
+
+  Globals.step[Globals._hlt][Globals.direct][4].set(Globals.stop_clock);
+
+  Globals.step[Globals._jmp][Globals.direct][4].set(Globals.load_pc_from_ir);
+  Globals.step[Globals._jmp][Globals.indirect][4].set(Globals.load_addr_from_ir);
+  Globals.step[Globals._jmp][Globals.indirect][5].set(Globals.load_pc_from_memory);
+  
+   for (let i = Globals._add; i <= Globals._jmp; i++)
+     for (let j = 0; j < 4; j++)
+       for (let k = 4; k < 11; k++)
+           if (Globals.step[i][j][k].data == 0)
+               Globals.step[i][j][k].set(Globals.set_count_to_zero);
+
+
+  Globals.step[Globals._jmz] = Globals.step[Globals._jmp];
+  Globals.step[Globals._jmn] = Globals.step[Globals._jmp];
+  Globals.step[Globals._jmf] = Globals.step[Globals._jmp];
+
+}  // end initialize Globals
+
+
+function Register(name, bits, defaultDisplayStyle) {
+   this.convert = new Converter();
+   this.textfield = document.getElementById(name + "_input");
+   this.label = document.getElementById(name + "_label");
+   this.name = name + ": ";
+   this.bits = bits;
+   this.displayStyle = this.defaultDisplayStyle = defaultDisplayStyle;
+   this.set(0);
+   if (bits == 16)
+      this.mask = 0xFFFF;
+   else {
+      let m = 0;
+      for (let i = 0; i < bits; i++)
+         m = (m << 1) | 1;
+      this.mask = m;
+   }
+}
+Register.defaultView = 1;
+Register.integerView = 2;
+Register.unsignedView = 3;
+Register.binaryView = 4;
+Register.assemblyView = 5;
+Register.makeRegisters = function() {
+   let registers = new Array(8);
+   registers[Globals._x] = new Register("X",16,Register.integerView);
+   registers[Globals._y] = new Register("Y",16,Register.integerView);
+   registers[Globals._flag] = new Register("FLAG",1,Register.integerView);
+   registers[Globals._ac] = new Register("AC",16,Register.integerView);
+   registers[Globals._count] = new Register("COUNT",4,Register.integerView);
+   registers[Globals._ir] = new Register("IR",16,Register.assemblyView);
+   registers[Globals._pc] = new Register("PC",10,Register.integerView);
+   registers[Globals._addr] = new Register("ADDR",10,Register.integerView);
+   return registers;
+};
+Register.sync = function(wiresToHilite) {
+   if (!wiresToHilite) {
+      let step = registers[Globals._count].value;
+      globalConverter.set(registers[Globals._ir].value);
+      let mode = globalConverter.getMode();
+      let ins = globalConverter.getInstruction();
+      wiresToHilite = Globals.step[ins][mode][step];
+   }
+   wireset = wiresToHilite;
+   if (!dimmed) {
+      memory.select( registers[Globals._addr].value );
+      hiliteWires(wireset);
+   }
+};
+Register.clearHilite = function() {
+   for (let i = 0; i < registers.length; i++)
+      registers[i].textfield.style.backgroundColor = "white";
+}
+Register.prototype.get = function() {
+   return this.value;
+};
+Register.prototype.set = function(val) {
+   this.value = val & this.mask;
+   this.valString = this.makeValString();
+   if (!dimmed) {
+      this.textfield.value = this.valString;
+      if (this.bits != 4) // not the count register
+         this.textfield.style.backgroundColor = "#FFFF99";
+   }
+};
+Register.prototype.setDisplayStyle = function(style) {
+   if (style == Register.defaultView)
+      style = this.defaultDisplayStyle;
+   if (style == this.displayStyle)
+      return;
+   this.displayStyle = style;
+   this.valString = this.makeValString();
+   if (!dimmed) {
+      this.textfield.value = this.valString;
+   }
+};
+Register.prototype.makeValString = function() {
+   switch (this.displayStyle) {
+      case Register.integerView:
+         return "" + this.get();
+      case Register.unsignedView:
+         this.convert.set(this.get());
+         return "" + this.convert.getUnsigned();
+      case Register.binaryView:
+         let val = this.get();
+         let binary = "";
+         for (let i = 1 << (this.bits-1); i > 0; i >>>= 1) {
+            binary += ((val & i) == 0)? '0' : '1';
+         }
+         return binary;
+      case Register.assemblyView:
+         this.convert.set(this.get());
+         return this.convert.getAssembly();
+      default:
+         return null;
+   }
+};
+
+
+function Memory(container) {
+   this.values = new Uint16Array(1024);
+   this.display = new Array(1024);
+   this.converter = new Converter();
+   this.selected = -1;
+   for (let i = 0; i < 1024; i++) {
+       let s = i + ": ";
+       while (s.length < 6)
+          s = " " + s;
+       s = "<span class='loc'>" + s + "</span>";
+       let par = document.createElement("p");
+       par.className = "mem";
+       par.innerHTML = s;
+       container.appendChild(par);
+       this.display[i] = document.createElement("span");
+       this.display[i].innerHTML = "<span id='m" + i + "'>0               </span>";
+       par.appendChild(this.display[i]);
+   }
+}
+Memory.prototype.clear = function() {
+   let val = this.makeValueString(0);
+   for (let i = 0; i < 1024; i++) {
+      this.display[i].innerHTML = val;
+      this.values[i] = 0;
+   }
+   g.fillStyle = "white";
+   g.fillRect(0,0,graphicsCanvas.width,graphicsCanvas.height);
+};
+Memory.prototype.get = function(index) {
+   return this.values[index];
+};
+Memory.prototype.set = function(index,value) {
+   this.values[index] = value;
+   this.display[index].innerHTML = this.makeValueString(value);
+   this.setGraphics(index,value);
+};
+Memory.prototype.setGraphics = function(index) {
+   let row = 2*Math.floor(index/4);
+   let col = 32*(index % 4);
+   g.fillStyle = "white";
+   g.fillRect(col,row,32,2);
+   g.fillStyle = "black";
+   for (let i = 1 << 15; i > 0; i >>>= 1) {
+      if (this.values[index] & i)
+         g.fillRect(col,row,2,2);
+      col += 2;
+   }
+};
+Memory.prototype.makeValueString = function(value) {
+   this.converter.set(value);
+   let s;
+   switch(memDisplay) {
+   case 1: //assembly
+      s = this.converter.getAssembly();
+      break;
+   case 2: //integer
+      s = "" + this.converter.getSigned();
+      break;
+   case 3: //unsigned
+      s = "" + this.converter.getUnsigned();
+      break;
+   case 4: //binary
+      let binary = "";
+      for (let i = 1 << 15; i > 0; i >>>= 1) {
+         binary += ((value & i) == 0)? '0' : '1';
+      }
+      return binary;
+   case 5: //ascii
+      s = this.converter.getAscii();
+   }
+   if (s.length < 16) {
+      s += '                '.substring(0,16-s.length);
+   }
+   return s;
+};
+Memory.prototype.newDisplay = function() {
+   let zero = this.makeValueString(0);
+   for (let i = 0; i < 1024; i++) {
+      if (this.get(i) === 0)
+         this.display[i].innerHTML = zero;
+      else
+         this.display[i].innerHTML = this.makeValueString(this.get(i));
+   }
+};
+Memory.prototype.select = function(location) {
+   if (location === null)
+      location = -1;
+   if (location === this.selected)
+      return;
+   if (this.selected >= 0)
+      this.display[this.selected].style.backgroundColor = "white";
+   this.selected = location;
+   if (this.selected >= 0) {
+      this.display[this.selected].style.backgroundColor = "#FFFF99";
+      if (autoscroll) {
+         this.scrollToSelection();
+      }
+   }
+};
+Memory.prototype.scrollToSelection = function() {
+   if (this.selected >= 0) {
+      let size = document.getElementById("mem").scrollHeight;
+      let offset = (size/1024)*this.selected;
+      document.getElementById("memholder").scrollTop = 1+Math.round(offset);
+   }
+};
+Memory.prototype.installProgram = function(mem) {
+   let zero = this.makeValueString(0);
+   for (let i = 0; i < 1024; i++) {
+      if (mem[i] != this.values[i]) {
+          this.values[i] = mem[i];
+          if (this.values[i] == 0)
+             this.display[i].innerHTML = zero;
+          else
+             this.display[i].innerHTML = this.makeValueString(this.values[i]);
+          this.setGraphics(i);
+      }
+   }
+};
+
+
+function hiliteWires(wireSet) {
+    for (let i = 0; i < 26; i++) {
+       wires[i].style.backgroundColor = wireSet.get(i)? "#FFFF99" : "white";
+    }
+}
+
+function doWire (wr, hilite) {
+  var a, b, ans, flag;
+  var loadFlag;
+  switch (wr) {
+    case Globals.load_data_into_memory: 
+       memory.set(registers[Globals._addr].get(), registers[Globals._ac].get());
+       break;
+    case Globals.load_x_from_ac: 
+       registerToRegister(Globals._ac, Globals._x);
+       break;
+    case Globals.load_y_from_memory: 
+       setRegister(Globals._y, memory.get(registers[Globals._addr].get()));
+       break;
+    case Globals.load_y_from_ir: 
+       registerToRegister(Globals._ir, Globals._y);
+       break;
+    case Globals.select_add:
+    case Globals.select_subtract:
+    case Globals.select_and:
+    case Globals.select_or:
+    case Globals.select_not:
+    case Globals.select_shift_right:
+    case Globals.select_shift_left:
+	     a = registers[Globals._x].get();
+	     b = registers[Globals._y].get();
+	     loadFlag = false;
+	     flag = 0;
+	     if (Globals.select_add == wr) {
+	       ans = a + b;
+	       loadFlag = true;
+	     }
+	     else if (Globals.select_subtract == wr) {
+	       ans = a - b;
+	       loadFlag = true;
+	     }
+	     else if (Globals.select_and == wr)
+	       ans = a & b;
+	     else if (Globals.select_or == wr)
+ 	       ans = a | b;
+	     else if (Globals.select_not == wr)
+	       ans = ~a;
+	     else if (Globals.select_shift_right == wr) {
+	       flag = (a & 1);
+	       ans = ((a >>> 1) & 0x7FFF);
+	       loadFlag = true;
+	     }
+	     else if (Globals.select_shift_left == wr) {
+	       loadFlag = true;
+	       ans = a << 1;
+	     }
+	     else
+	       ans = 0;
+	     setRegister(Globals._ac, ans);
+	     if (loadFlag)
+	        if (((ans & 0x10000) != 0) || (flag != 0))
+	            setRegister(Globals._flag, 1);
+	        else
+	            setRegister(Globals._flag, 0);
+         break;
+    case Globals.load_ac_from_memory: 
+       setRegister(Globals._ac, memory.get(registers[Globals._addr].get()));
+       break;
+    case Globals.load_ac_from_ir: 
+       registerToRegister(Globals._ir, Globals._ac);
+       break;
+    case Globals.increment_ac: 
+       setRegister(Globals._ac, (registers[Globals._ac].get() + 1));
+       break;
+    case Globals.decrement_ac: 
+       setRegister(Globals._ac, (registers[Globals._ac].get() - 1));
+       break;
+    case Globals.load_flag_from_alu: 
+       break;
+    case Globals.load_pc_from_memory: 
+       setRegister(Globals._pc, memory.get(registers[Globals._addr].get()));
+       break;
+    case Globals.load_pc_from_ir: 
+       registerToRegister(Globals._ir, Globals._pc);
+       break;
+    case Globals.increment_pc: 
+       setRegister(Globals._pc, (registers[Globals._pc].get() + 1) );
+       break;
+    case Globals.load_ir_from_memory: 
+       setRegister(Globals._ir, memory.get(registers[Globals._addr].get()));
+       break;
+    case Globals.load_addr_from_ir: 
+       registerToRegister(Globals._ir, Globals._addr);
+       break;
+    case Globals.load_addr_from_pc: 
+       registerToRegister(Globals._pc, Globals._addr);
+       break;
+    case Globals.load_addr_from_y: 
+       registerToRegister(Globals._y, Globals._addr);
+       break;
+    case Globals.set_count_to_zero: 
+       setRegister(Globals._count,0);
+       break;
+    case Globals.stop_clock: 
+       computerHalted = true;
+       break;
+   }
+   function registerToRegister(r1, r2) {
+      var val;
+      if (r1 == Globals._ir)
+         val = (registers[Globals._ir].get() & 0x3FF);
+      else
+         val = registers[r1].get();
+      setRegister(r2,val);
+   }
+   function setRegister(reg,val) {
+      registers[reg].set(val);
+      if (hilite) {
+          registers[reg].hilite();
+      }
+   }
+}
+
+
+function setDimmed(dim) {
+   if (dim == dimmed)
+      return;
+   dimmed = dim;
+   if (dimmed) {
+      memory.select(-1);
+      hiliteWires(BitSet.none);
+   }
+   else
+      Register.sync();
+   for (let i = 0; i < registers.length; i++) {
+      if (dimmed) {
+         registers[i].label.style.color = "#6666CC";
+         registers[i].textfield.value = "";
+      }
+      else {
+         registers[i].label.style.color = "#0000CC";
+         registers[i].textfield.value = registers[i].valString;
+      }
+   }
+   for (let i = 0; i < wires.length; i++) {
+      wires[i].style.color = dimmed? "#CCCCCC" : "black";
+   }
+}
+
+function doRun() {
+    setError(null);
+    if (running) {
+       stopRunning();
+    }
+    else {
+      disableButtons();
+      running = true;
+      if (speed == 1)
+         setDimmed(true);
+      else if (speed == 2) {
+         hiliteWires(BitSet.none);
+         for (let i = 0; i < wires.length; i++)
+            wires[i].style.color = "#CCCCCC";
+         memory.select(-1);
+      }
+      frameRequest = requestAnimationFrame(frame);
+      executionState = "animating";
+      buttons[0].innerHTML = "Stop";
+      buttons[0].disabled = false;
+    }
+}
+
+function frame() {
+   if (frameCountdown > 0) {
+       frameCountdown--;
+       frameRequest = requestAnimationFrame(frame);
+       return;
+   }
+   frameRequest = null;
+   let wires;
+   switch (executionState) {
+      case "oneStepFlashCount":
+         enableButtons();
+         executionState = "idle";
+         registers[Globals._count].set(0);
+         Register.sync();
+         return;
+      case "animating":
+         Register.clearHilite();
+         switch (speed) {
+            case 1:
+               for (let i = 0; i < 10; i++) {
+                  doOneCycle();
+                  if (wires.get(Globals.stop_clock))
+                     break;
+               }
+               break;
+            case 2:
+               doOneCycle();
+               Register.clearHilite();
+               break;
+            default:
+               Register.clearHilite();
+               wires = doOneStep();
+               Register.sync();
+               break;
+         }
+         if ( wires.get(Globals.set_count_to_zero) ) {
+             registers[Globals._count].set(0);
+         }
+         if (wires.get(Globals.stop_clock)) {
+            stopRunning();
+            Register.sync();
+            return;
+         }
+         switch (speed) {
+            case 1:
+            case 2:
+               frameCountdown = 0;
+               break;
+            case 3:
+               frameCountdown = 2;
+               break;
+            case 4:
+               frameCountdown = 10;
+               break;
+            case 5:
+               frameCountdown = 40;
+               break;
+         }
+         frameRequest = requestAnimationFrame(frame);
+         break;
+   }
+   function doOneCycle() {
+      do {
+         wires = doOneStep();
+      } while ( !wires.get(Globals.set_count_to_zero) && !wires.get(Globals.stop_clock) );
+      if (wires.get(Globals.set_count_to_zero))
+         registers[Globals._count].set(0);
+   }
+}
+
+function doStep() {
+   setError(null);
+   if (executionState != "idle")
+      return;
+   Register.clearHilite();
+   let wires = doOneStep();
+   if (wires.get(Globals.set_count_to_zero)) {
+       disableButtons();
+       Register.sync();
+       executionState = "oneStepFlashCount";
+       frameCountdown = 15;
+       frameRequest = requestAnimationFrame(frame);
+   }
+   else 
+      Register.sync(wires);
+}
+
+function doCycle() {
+   setError(null);
+   if (executionState != "idle")
+      return;
+   let wires;
+   do {
+       wires = doOneStep();
+   }
+   while ( !wires.get(Globals.set_count_to_zero) && !wires.get(Globals.stop_clock));
+   if (wires.get(Globals.set_count_to_zero))
+      registers[Globals._count].set(0);
+   else {
+      hiliteWires(wires);
+      disableButtons();
+      setTimeout(function() {
+         if (executionState == "idle")
+            enableButtons();
+      }, 400);
+   }
+   Register.clearHilite();
+   Register.sync();
+}
+
+function doSpeedChange() {
+   var newSpeed = Number(document.getElementById("speed").value);
+   if (newSpeed == speed)
+      return;
+   if (running) {
+      if (speed == 1) {
+         setDimmed(false);
+         frameCountdown = 0;
+      }
+      else if (newSpeed == 1)
+         setDimmed(true);
+      if (speed == 2 && newSpeed > 2) {
+         for (let i = 0; i < wires.length; i++)
+            wires[i].style.color = "black";
+         Register.sync();
+      }
+      else if (newSpeed == 2) {
+         hiliteWires(BitSet.none);
+         for (let i = 0; i < wires.length; i++)
+            wires[i].style.color = "#CCCCCC";
+         memory.select(-1);
+      }
+   }
+   speed = newSpeed;
+}
+
+function doClearMem() {
+    stopRunning();
+    memory.clear();
+}
+
+function doZeroPC() {
+   stopRunning();
+   registers[Globals._pc].set(0);
+   registers[Globals._count].set(0);
+   Register.sync(BitSet.none);
+   Register.clearHilite();
+}
+
+function doAddrToPC() {
+   stopRunning();
+   let addr = document.getElementById("Addr").value.trim();
+   if (addr == "") {
+      alert("The address input is empty!");
+      return;
+   }
+   addr = Number(addr);
+   if (isNaN(addr)) {
+      alert("The address input does not contain a legal number");
+      return;
+   }
+   if (addr < 0 || addr > 1023) {
+      alert("Address input must be between 0 and 1023");
+      return;
+   }
+   registers[Globals._pc].set(addr);
+   registers[Globals._count].set(0);
+   Register.sync(BitSet.none);
+   Register.clearHilite();
+}
+
+function doDataToMem() {
+   stopRunning();
+   let data = document.getElementById("Data").value.trim();
+   if (data == "") {
+      alert("The data input is empty!");
+      return;
+   }
+   try {
+       data = parse(data,true);
+   }
+   catch (e) {
+       alert("Error in data: " + e.message);
+       return;
+   }
+   let addr = document.getElementById("Addr").value.trim();
+   if (addr == "") {
+      alert("The address input is empty!");
+      return;
+   }
+   addr = Number(addr);
+   if (isNaN(addr)) {
+      alert("The address input does not contain a legal number");
+      return;
+   }
+   if (addr < 0 || addr > 1023) {
+      alert("Address input must be between 0 and 1023");
+      return;
+   }
+   memory.set(addr,data);
+   memory.select(addr);
+}
+
+function doLoadProgram() {
+   stopRunning();
+   let program = document.getElementById("program").value;
+   try {
+      let mem = parse(program);
+      stopRunning();
+      memory.installProgram(mem);
+      registers[Globals._pc].set(0);
+      registers[Globals._count].set(0);
+      Register.sync(BitSet.none);
+      Register.clearHilite();
+      window.scrollTo(0,window.pageYOffset+document.getElementById("comp").getBoundingClientRect().top);
+   }
+   catch (e) {
+      setError("Program error: " + e.message);
+      document.getElementById("program").setSelectionRange(e.pos,e.pos);
+      document.getElementById("program").focus();
+   }
+}
+
+function doAutoscroll() {
+   autoscroll = document.getElementById("autoscroll").checked;
+   if (autoscroll)
+      memory.scrollToSelection();
+}
+
+function doRegisterDisplayChange() {
+   let d = Number(document.getElementById("regdisplay").value);
+   if (d == registerDisplay)
+      return;
+   registerDisplay = d;
+   for (let i = 0; i < registers.length; i++) {
+      registers[i].setDisplayStyle(d);
+   }
+}
+
+function doMemDisplayChange() {
+   let d = Number(document.getElementById("memdisplay").value);
+   if (d == memDisplay)
+      return;
+   memDisplay = d;
+   memory.newDisplay();
+}
+
+function doProgramChange() {
+   stopRunning();
+   let currentProg = programs[programInEditor];
+   currentProg.text = document.getElementById("program").value;
+   document.getElementById("error").innerHTML = "&nbsp;";
+   let p = document.getElementById("selectprogram").value;
+   if (p == "new") {
+       untitledCount++;
+       let pos = programs.length;
+       let prog = { name: "User Program " + untitledCount, text: "",
+                    position: pos, status: "user" };
+        programs.push(prog);
+        document.getElementById("program").value = "";
+        let option = document.createElement("option");
+        option.value = "" + (pos+1);
+        option.innerHTML = prog.name;
+        document.getElementById("selectprogram").appendChild(option);
+        document.getElementById("selectprogram").value = "" + (pos+1);
+        document.getElementById("program").disabled = false;
+        programInEditor = pos;
+   }
+   else {
+       p = Number(p) - 1;
+       let prog = programs[p];
+       programInEditor = prog.position;
+       if (prog.status == "not started") {
+          startProgramLoad(prog);
+       }
+       else {
+           document.getElementById("program").value = prog.text;
+           document.getElementById("program").disabled = (prog.status == "loading");
+       }
+   }
+}
+
+function setError(message) {
+    if (!message)
+       message="&nbsp;";
+    document.getElementById("error").innerHTML = message;
+}
+
+
+function disableButtons() {
+   for (let i = 0; i < buttons.length; i++)
+       buttons[i].disabled = true;
+}
+
+function enableButtons() {
+   for (let i = 0; i < buttons.length; i++)
+       buttons[i].disabled = false;
+}
+
+function stopRunning() { // make sure everything is in correct state
+   setError(null);
+   if (frameRequest !== null) {
+      cancelAnimationFrame(frameRequest);
+      frameRequest = null;
+   }
+   if (running) {
+       running = false;
+       document.getElementById("run").innerHTML = "Run&nbsp;";
+       executionState = "idle";
+       enableButtons();
+       buttons[0].innerHTML = "Run";
+       setDimmed(false);
+   }
+   setDimmed(false);
+   for (let i = 0; i < wires.length; i++)
+      wires[i].style.color = "black";
+   Register.sync();   
+}
+
+function doOneStep() {  // returns true if cycle ends because count register needs to be set to zero
+    let instruction = registers[Globals._ir].get();
+    let count = registers[Globals._count].get();
+    count++;
+    registers[Globals._count].set(count);
+    globalConverter.set(instruction);
+    let cmd = globalConverter.getInstruction();
+    let mode = globalConverter.getMode();
+    if (cmd == Globals._jmn || cmd == Globals._jmz || cmd == Globals._jmf) {
+        if (count == 4) { // conditional jump -- if no jump, set clock to zero
+            let jump = false;
+            if (cmd == Globals._jmf)
+               jump = registers[Globals._flag].get() == 1;
+            else if (cmd == Globals._jmz)
+               jump = registers[Globals._ac].get() == 0;
+            else
+               jump = (registers[Globals._ac].get() & 0x8000) != 0;
+            if (!jump) {
+               return BitSet.setCountToZero;
+            }
+        }
+    }
+    let wireSet = Globals.step[cmd][mode][count];
+    if (wireSet.get(Globals.set_count_to_zero))
+       return BitSet.setCountToZero;
+    for (let i = 0; i < 26; i++) {
+        if (wireSet.get(i))
+           doWire(i);
+    }
+    return wireSet;
+}
+
+function startProgramLoad(program) {  
+   if (program.status != "not started")
+      return;
+   program.status = "loading";
+   program.text = "Waiting for program '" + program.name + "' to load from url " + program.url;
+   if (program.position == programInEditor) {
+       document.getElementById("program").value = program.text;
+       document.getElementById("program").disabled = true;
+   }
+   var ajaxTimeout;
+   var ajax = new XMLHttpRequest();
+   ajax.open("GET",program.url);
+   ajax.overrideMimeType("text/plain");
+   ajax.addEventListener("error",function() {
+       clearTimeout(ajaxTimeout);
+       program.text = "Error: Program could not be loaded from " + program.url;
+       program.status = "error";
+       doneLoad();
+   });
+   ajax.addEventListener("load",function() {
+       clearTimeout(ajaxTimeout);
+       program.text = ajax.responseText;
+       program.status = "loaded";
+       doneLoad();
+   });
+   ajaxTimeout = setTimeout(function() {
+       ajax.abort();
+       program.text = "Error: Request timed out while trying to load from " + program.url;
+       program.status = "error";
+       doneLoad();
+   }, 30000);
+   try {
+      ajax.send();
+   } catch(e) {
+       clearTimeout(ajaxTimeout);
+       program.status = "error";
+       program.text = "Error while trying to send request for example: " + program.url;
+       doneLoad();
+   }
+function doneLoad() {
+      if (program.position == programInEditor) {
+          document.getElementById("program").value = program.text;
+          document.getElementById("program").disabled = false;
+      }
+   }
+}
+
+
+function showMemExport() { 
+    document.getElementById("memexportbg").style.display = "block";
+    document.getElementById("memexport").style.display = "block";
+    document.addEventListener("keydown", memhexEscape, false);
+    stopRunning();
+    let str = "v2.0 raw\n";
+    let i = 0;
+    let zeroCt = 0;
+    for (let i = 0; i < 1024; i++) {
+       let val = memory.get(i);
+       if (val == 0)
+          zeroCt++;
+       else {
+          if (zeroCt > 3) {
+             str += zeroCt + "*0\n";
+             zeroCt = 0;
+          }
+          else if (zeroCt > 0) {
+             for (let j = 0; j < zeroCt; j++) {
+                str += "0\n";
+             }
+             zeroCt = 0;
+          }
+          let num = val.toString(16);
+          str +=  num + "\n";
+       }
+    }
+    if (zeroCt == 1024)
+       document.getElementById("memhex").value = "v2.0 raw\n1024*0\n";
+    else
+       document.getElementById("memhex").value = str;
+}
+
+function hideMemExport() {
+    document.getElementById("memexportbg").style.display = "none";
+    document.getElementById("memexport").style.display = "none";
+    document.removeEventListener("keydown", memhexEscape, false);
+}
+
+function memhexEscape(evt) {
+    if (evt.keyCode == 27) {
+        hideMemExport();
+    }
+}
+
+
+
+function setUpFileHandling() {  // File handling for saving and loading files; added November 2023.
+   var saveBtn = document.getElementById("saveBtn");
+   var loadBtn = document.getElementById("loadBtn");
+   var loading = false;
+   if (window.showOpenFilePicker && FileSystemFileHandle && FileSystemFileHandle.prototype.getFile) {
+        loadBtn.addEventListener("click",doLoad,false);
+    }
+    else {
+        let chooser = document.createElement("input");
+        chooser.type = "file";
+        chooser.id = "chooseloadfile";
+        chooser.style.display = "none";
+        document.getElementById("comp").appendChild(chooser);
+        loadBtn.addEventListener("click",doBasicLoad,false);
+        loadBtn.title += "  This will look like uploading a file, but it will only be loaded locally.";
+    }
+    if (window.showSaveFilePicker && FileSystemFileHandle && FileSystemFileHandle.prototype.createWritable) {
+        saveBtn.addEventListener("click",doSave,false);  
+    }
+    else {
+        saveBtn.addEventListener("click",doBasicSave,false);
+        saveBtn.title += "  This will look like downloading a file.";
+    }
+    function doBasicSave() {
+        if (loading)
+           return;
+        stopRunning();
+        let content = document.getElementById("program").value;
+        let name = programs[programInEditor].name.replace(/&lt;/g,"<").replace(/&amp;/g,"&");
+        let blob = new Blob([content], {type: 'text/plain'});
+        let link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = name + ".txt";
+        link.click();
+        URL.revokeObjectURL(link.href);
+    }
+    async function doSave() {
+        if (loading)
+           return;
+        stopRunning();
+        let content = document.getElementById("program").value;
+        let name = programs[programInEditor].name.replace(/&lt;/g,"<").replace(/&amp;/g,"&");
+        let blob = new Blob([content], {type: 'text/plain'});
+        let options = { suggestedName: name + ".txt" };
+        try {
+            let fileHandle = await window.showSaveFilePicker(options);
+            let stream = await fileHandle.createWritable();
+            await stream.write(blob);
+            await stream.close();
+            setMessage("File has been saved.");
+        }
+        catch (e) {
+            if (e.name !== "AbortError") {
+                setMessage("Error while attempting to save file!");
+                alert("Error while saving file:\n" + e);
+            }
+        }
+    }
+    function doBasicLoad() {
+        stopRunning();
+        let chooser = document.getElementById("chooseloadfile");
+        chooser.value = "";
+        document.getElementById("chooseloadfile").addEventListener("change",handleBasicFileLoad,false);
+        chooser.click();
+    }
+    async function handleBasicFileLoad() {
+       stopRunning();
+       loadBtn.disabled = true;
+       loading = true;
+       try {
+            let chooser = document.getElementById("chooseloadfile");
+            chooser.removeEventListener("change",handleBasicFileLoad,false);
+            if (chooser.files.length === 0)
+               return;
+            let name = chooser.files[0].name.replace("/&/g", "&amp;").replace("/</g", "&lt;");
+            setMessage("Trying to load file " + name);
+            if ( chooser.files[0].type && ! /^text/i.test(chooser.files[0].type))
+                throw "Only text files can be loaded.";
+            let text = await chooser.files[0].text();
+            newProgram(chooser.files[0].name,text);
+            setMessage("Successfully loaded file " + name);
+       }
+       catch (e) {
+           setMessage("File load failed!");
+           alert("File load failed:\n" + e);
+       }
+       finally {
+           loadBtn.disabled = false;
+           loading = false;
+       }
+    }
+    async function doLoad() {
+       setMessage("Load file -- select a file or cancel!");
+       loading = true;
+       loadBtn.disabled = true;
+       try {
+           let files = await window.showOpenFilePicker();
+           if (files.length === 0) {
+              setMessage("File load canceled"); // (Can this happen?)
+              return;
+           }
+           let fileData = await files[0].getFile();
+           if ( fileData.type && ! /^text/i.test(fileData.type)) 
+               throw "Only text files can be loaded.";
+           let text = await fileData.text();
+           newProgram(fileData.name,text);
+           setMessage("Successfully loaded file " + fileData.name.replace("/&/g", "&amp;").replace("/</g", "&lt;"));
+       }
+       catch (e) {
+           if (e.name === "AbortError")
+              setMessage("File load canceled");
+           else {
+              setMessage("File load failed!");
+              alert("File load failed:\n" + e);
+           }
+       }
+       finally {
+           loadBtn.disabled = false;
+           loading = false;
+       }
+    }
+    function newProgram(name,text) {
+        let currentProg = programs[programInEditor];
+        currentProg.text = document.getElementById("program").value;
+        let pos = programs.length;
+        name = name.replace(/\.txt$/,"").replace("/&/g", "&amp;").replace("/</g", "&lt;");
+        let prog = { name: name, text: text,
+                    position: pos, status: "user" };
+        programs.push(prog);
+        document.getElementById("program").value = text;
+        let option = document.createElement("option");
+        option.value = "" + (pos+1);
+        option.innerHTML = prog.name;
+        document.getElementById("selectprogram").appendChild(option);
+        document.getElementById("selectprogram").value = "" + (pos+1);
+        programInEditor = pos;
+    }
+    function setMessage(msg) {
+       document.getElementById("error").innerHTML = msg;
+    }
+}
+
+
+function setUpProgramMenu() {  // Big revisions to file menu andling, November 2023
+   var search = location.search;
+   if (search === "?files=none" || search === "?files=") {
+      programsToLoad = null;
+      createMenu();
+      return;
+   }
+   if (search === "" || search.indexOf("?files=") !== 0) {
+      createMenu();
+      return;
+   }
+   programsToLoad = "";
+   document.getElementById("error").innerHTML = "Trying to load list of sample programs...";
+   var fileURL = search.substring(7);
+   var ajaxTimeout;
+   var ajax = new XMLHttpRequest();
+   ajax.open("GET",fileURL);
+   ajax.overrideMimeType("text/plain");
+   ajax.addEventListener("error",function() {
+       clearTimeout(ajaxTimeout);
+       document.getElementById("error").innerHTML = "Could not load sample file list.";
+       console.log("error while trying to load file list: ajax request error.");
+       createMenu();
+   });
+   ajax.addEventListener("load",function() {
+       clearTimeout(ajaxTimeout);
+       var text = ajax.responseText;
+       document.getElementById("error").innerHTML = "&nbsp;";
+       try {
+           programs = JSON.parse(text);
+           if (programs.length === undefined)
+              throw "error";
+           for (var i = 0; i < programs.length; i++) {
+              if (typeof programs[i] !== "object")
+                 throw "error";
+              if ( ! ( programs[i].name && programs[i].url ))
+                 throw "error";
+              if ( ! ( typeof programs[i].name === "string" && typeof programs[i].url === "string"))
+                 throw "error";
+              program.name = program.name.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+           }
+           programsToLoad = programs;
+       }
+       catch (e) {
+          console.log("error while trying to load file list: " + e);
+          document.getElementById("error").innerHTML = "Could not load sample programs. Syntax error in sample file list.";
+       }
+       createMenu();
+   });
+   ajaxTimeout = setTimeout(function() {
+       ajax.abort();
+       console.log("error while trying to load file list: request timed out.");
+       document.getElementById("error").innerHTML = "Could not load sample programs. Could not load sample file list.";
+       createMenu();
+   }, 10000);
+   try {
+      ajax.send();
+   } catch(e) {
+       clearTimeout(ajaxTimeout);
+       document.getElementById("error").innerHTML = "Could not load sample programs. Could not load sample file list.";
+       createMenu();
+   }
+   function createMenu() {
+      if (programsToLoad && programsToLoad.length > 0) {
+         untitledCount = 0;
+         programs = programsToLoad;
+         let options = "<option value='new'>[New Program]</option>";
+         for (let i = 0; i < programs.length; i++) {
+            options += "<option value='" + (i+1) +"'>" + programs[i].name + "</option>";
+            programs[i].position = i;
+            programs[i].status = "not started";
+         }
+         document.getElementById("selectprogram").innerHTML = options;
+         programInEditor = 0;
+         startProgramLoad(programs[0]);
+      }
+      else {
+         document.getElementById("selectprogram").innerHTML =
+                   "<option value='new'>[New Program]</option>" +
+                   "<option value='1'>User Program 1</option>";
+         untitledCount = 1;
+         programs = [
+            { name: "User Program 1", text: "", position: 0, status: "user" }
+         ];
+         programInEditor = 0;
+      }
+      document.getElementById("selectprogram").value = "1";
+      document.getElementById("selectprogram").onchange = doProgramChange;
+   }
+}
+
+
+function init() {
+    speed = 3;
+    registerDisplay = 1;
+    memDisplay = 2;
+    autoscroll = true;
+    document.getElementById("speed").value = "3";
+    document.getElementById("regdisplay").value = "1";
+    document.getElementById("memdisplay").value = "2";
+       document.getElementById("program").value = "";
+    document.getElementById("Addr").value = "";
+    document.getElementById("Data").value = "";
+    document.getElementById("autoscroll").checked = true;
+    buttons = [
+        document.getElementById("run"),
+        document.getElementById("step"),
+        document.getElementById("cycle"),
+        document.getElementById("clearmem"),
+        document.getElementById("zeropc"),
+        document.getElementById("addrtopc"),
+        document.getElementById("datatomem")
+    ];
+    buttons[0].onclick = doRun;
+    buttons[1].onclick = doStep;
+    buttons[2].onclick = doCycle;
+    buttons[3].onclick = doClearMem;
+    buttons[4].onclick = doZeroPC;
+    buttons[5].onclick = doAddrToPC;
+    buttons[6].onclick = doDataToMem;
+    enableButtons();
+    document.getElementById("load").onclick = doLoadProgram;
+    document.getElementById("speed").onchange = doSpeedChange;
+    document.getElementById("regdisplay").onchange = doRegisterDisplayChange;
+    document.getElementById("memdisplay").onchange = doMemDisplayChange;
+    document.getElementById("selectprogram").onchange = doProgramChange;
+    document.getElementById("autoscroll").onchange = doAutoscroll;
+    document.getElementById("hidememhex").onclick = hideMemExport;
+    document.getElementById("showmemhex").onclick = showMemExport;
+    globalConverter = new Converter();
+    registers = Register.makeRegisters();
+    wires = new Array(26);
+    memory = new Memory( document.getElementById("mem") );
+    for (let i = 0; i < 26; i++) {
+        wires[i] = document.getElementById("w" + i);
+    }
+    try {
+        graphicsCanvas = document.getElementById("graphics");
+        g = graphicsCanvas.getContext("2d");
+        g.fillStyle = "white";
+        g.fillRect(0,0,graphicsCanvas.width,graphicsCanvas.height);
+    }
+    catch (e) {
+        document.getElementById("graphicsholder").innerHTML =
+           "<p style='color:white'>Graphics<br>view of <br>memory<br>is not<br>available<br>" +
+           "because<br>your<br>browser<br>does not<br>support<br>canvas<br>graphics.</p>";
+        g = null;
+    }
+    memory.select(0);
+    Register.sync(BitSet.none);
+    Register.clearHilite();
+    setUpProgramMenu();
+    setUpFileHandling();
+}
+
+</script>
+</head>
+
+<body onload="init();">
+
+<noscript>
+   <p style="font-weight: bold; color:red">This page requires Javascript.<br>
+   Without Javascript, nothing on this page will be functional.</p>
+</noscript>
+
+
+<p style="border-bottom: 1.5pt solid black;"><span style="font-size:200%; font-weight:bold;margin: 5pt 0 5pt 0;">xComputer</span>
+<span style="margin-left: 50pt"><b>Click for: <a href="https://math.hws.edu/eck/js/xComputer/info.html">information and instructions</a>.</b></span></p>
+
+<table class="prog" border="0" cellspacing="0" cellpadding="0">
+
+<tbody><tr>
+  <td>
+   <p style="margin:0 0 0 20pt; padding:0">
+    Select Program: <select id="selectprogram" title="Sets the contents of the program editor.  To start a new, empty program, select &#39;[New Program]&#39;. To change to an existing program, select its name."><option value="new">[New Program]</option><option value="1">The Basics</option><option value="2">Multiplication Using Labels</option><option value="3">Graphical View of Memory</option><option value="4">Three-N-plus-one Sequence</option><option value="5">Using a Subroutine</option><option value="6">Multiplication by Subroutine</option><option value="7">Testing for Prime Numbers</option><option value="8">Powers of Three</option></select>
+    </p>
+  </td>
+  <td align="right">
+    <p style="margin: 0 0 0 10pt; padding:0">
+       <button id="saveBtn" title="Save the program to a local file.">Save</button>
+       <button id="loadBtn" title="Load a program from a local file." style="margin-left:7px">Load</button>
+    </p>
+  </td>
+</tr>
+
+<tr>
+   <td colspan="2">
+     <p style="padding: 0; margin: 5pt 2pt 5pt 20pt">
+        <textarea spellcheck="false" placeholder="Input or paste your xComputer program here." id="program" wrap="off" rows="15" cols="80"></textarea>
+     </p>
+   </td>
+</tr>
+
+<tr>
+   <td colspan="2">
+       <p style="margin:0; padding:0"><button style="margin-left:20pt;" id="load" title="Convert the program in the editor to machine language and load it into the xComputer simulator.  If an error is found in the program, it will be reported below this button.">Load Program into xComputer</button></p>
+   </td>
+</tr>
+   
+</tbody></table>
+
+
+<p id="error">&nbsp;</p>
+
+<div id="comp">
+<table border="2" cellspacing="0" cellpadding="4">
+<tbody><tr>
+
+<td>
+   <table border="0">
+   <tbody><tr>
+      <td colspan="2"><p class="heading">Controls</p></td>
+   </tr>
+   <tr>
+      <td><button id="run" title="Start running the program, or stop it if it is currently executing.  The speed of execution is controlled by the menu below. Execution stops automatically if a HLT instruction is encountered.">Run&nbsp;</button>
+          <button id="step" title="Perform one step in the execution of one instruction.  Note that control wires that implement the step and registers that are affected by the step will be highlited.">Step</button>
+          <button id="cycle" title="Execute one machine language instruction.  This execute single steps until the count register is set to zero.">Cycle</button></td>
+      <td><span class="label" align="right">addr:</span>
+          <input type="text" size="16" id="Addr" title="Input a memory address, which must be a number in the range 0 to 1023. The address is used by the &#39;Addr to PC&#39; and &#39;Data to Mem&#39; buttons."></td>
+   </tr>
+   <tr>
+      <td>
+         <select id="speed" title="Select the speed at which the program will be run when the &#39;Run&#39; button is pressed.">
+             <option value="1">Fastest Run Speed</option>
+             <option value="2">Fast Run Speed</option>
+             <option value="3">Moderate Run Speed</option>
+             <option value="4">Slow Run Speed</option>
+             <option value="5">Slower Run Speed</option>
+         </select></td>
+      <td><span class="label" align="right">data:</span>
+         <input type="text" size="16" id="Data" title="Enter data to be placed in memory by the &#39;Data to Mem&#39; button.  The data can be a number decimal, binary, or hexadecimal form, or it can be an assembly language instruction."></td>
+   </tr>
+   <tr>
+      <td colspan="2"><button id="clearmem" title="Set the contents of all locations in memory to zero.">Clear Mem</button>
+      <button id="zeropc" title="Place a zero into the PC register.  This lets you start executing the program from the first instruction.  Also sets COUNT register to zero.">Set PC=0</button>
+      <button id="addrtopc" title="Copy the contents of the Addr input box, above, into the PC register.  This lets you start program execution at that memory address.  Also sets COUNT register to zero.">Addr to PC</button>
+      <button id="datatomem" title="Copy the value in the Data input box, above, into the memory location whose address is given by the Addr input box, above.  This lets you load data or instructions into memory by hand.">Data to Mem</button>
+      </td>
+   </tr>
+   </tbody></table>
+</td>
+<td rowspan="3" valign="top">
+   <p class="heading">Memory</p>
+   <p><select id="memdisplay" title="Select how the values in memory locations are displayed.">
+      <option value="1">Assembly display</option>
+      <option value="2">Integer display</option>
+      <option value="3">Unsigned display</option>
+      <option value="4">Binary display</option>
+      <option value="5">ASCII display</option>
+   </select></p>
+   <div id="memholder">
+   <div id="mem">
+   <p class="mem"><span class="loc">   0: </span><span style="background-color: rgb(255, 255, 153);"><span id="m0">0               </span></span></p><p class="mem"><span class="loc">   1: </span><span><span id="m1">0               </span></span></p><p class="mem"><span class="loc">   2: </span><span><span id="m2">0               </span></span></p><p class="mem"><span class="loc">   3: </span><span><span id="m3">0               </span></span></p><p class="mem"><span class="loc">   4: </span><span><span id="m4">0               </span></span></p><p class="mem"><span class="loc">   5: </span><span><span id="m5">0               </span></span></p><p class="mem"><span class="loc">   6: </span><span><span id="m6">0               </span></span></p><p class="mem"><span class="loc">   7: </span><span><span id="m7">0               </span></span></p><p class="mem"><span class="loc">   8: </span><span><span id="m8">0               </span></span></p><p class="mem"><span class="loc">   9: </span><span><span id="m9">0               </span></span></p><p class="mem"><span class="loc">  10: </span><span><span id="m10">0               </span></span></p><p class="mem"><span class="loc">  11: </span><span><span id="m11">0               </span></span></p><p class="mem"><span class="loc">  12: </span><span><span id="m12">0               </span></span></p><p class="mem"><span class="loc">  13: </span><span><span id="m13">0               </span></span></p><p class="mem"><span class="loc">  14: </span><span><span id="m14">0               </span></span></p><p class="mem"><span class="loc">  15: </span><span><span id="m15">0               </span></span></p><p class="mem"><span class="loc">  16: </span><span><span id="m16">0               </span></span></p><p class="mem"><span class="loc">  17: </span><span><span id="m17">0               </span></span></p><p class="mem"><span class="loc">  18: </span><span><span id="m18">0               </span></span></p><p class="mem"><span class="loc">  19: </span><span><span id="m19">0               </span></span></p><p class="mem"><span class="loc">  20: </span><span><span id="m20">0               </span></span></p><p class="mem"><span class="loc">  21: </span><span><span id="m21">0               </span></span></p><p class="mem"><span class="loc">  22: </span><span><span id="m22">0               </span></span></p><p class="mem"><span class="loc">  23: </span><span><span id="m23">0               </span></span></p><p class="mem"><span class="loc">  24: </span><span><span id="m24">0               </span></span></p><p class="mem"><span class="loc">  25: </span><span><span id="m25">0               </span></span></p><p class="mem"><span class="loc">  26: </span><span><span id="m26">0               </span></span></p><p class="mem"><span class="loc">  27: </span><span><span id="m27">0               </span></span></p><p class="mem"><span class="loc">  28: </span><span><span id="m28">0               </span></span></p><p class="mem"><span class="loc">  29: </span><span><span id="m29">0               </span></span></p><p class="mem"><span class="loc">  30: </span><span><span id="m30">0               </span></span></p><p class="mem"><span class="loc">  31: </span><span><span id="m31">0               </span></span></p><p class="mem"><span class="loc">  32: </span><span><span id="m32">0               </span></span></p><p class="mem"><span class="loc">  33: </span><span><span id="m33">0               </span></span></p><p class="mem"><span class="loc">  34: </span><span><span id="m34">0               </span></span></p><p class="mem"><span class="loc">  35: </span><span><span id="m35">0               </span></span></p><p class="mem"><span class="loc">  36: </span><span><span id="m36">0               </span></span></p><p class="mem"><span class="loc">  37: </span><span><span id="m37">0               </span></span></p><p class="mem"><span class="loc">  38: </span><span><span id="m38">0               </span></span></p><p class="mem"><span class="loc">  39: </span><span><span id="m39">0               </span></span></p><p class="mem"><span class="loc">  40: </span><span><span id="m40">0               </span></span></p><p class="mem"><span class="loc">  41: </span><span><span id="m41">0               </span></span></p><p class="mem"><span class="loc">  42: </span><span><span id="m42">0               </span></span></p><p class="mem"><span class="loc">  43: </span><span><span id="m43">0               </span></span></p><p class="mem"><span class="loc">  44: </span><span><span id="m44">0               </span></span></p><p class="mem"><span class="loc">  45: </span><span><span id="m45">0               </span></span></p><p class="mem"><span class="loc">  46: </span><span><span id="m46">0               </span></span></p><p class="mem"><span class="loc">  47: </span><span><span id="m47">0               </span></span></p><p class="mem"><span class="loc">  48: </span><span><span id="m48">0               </span></span></p><p class="mem"><span class="loc">  49: </span><span><span id="m49">0               </span></span></p><p class="mem"><span class="loc">  50: </span><span><span id="m50">0               </span></span></p><p class="mem"><span class="loc">  51: </span><span><span id="m51">0               </span></span></p><p class="mem"><span class="loc">  52: </span><span><span id="m52">0               </span></span></p><p class="mem"><span class="loc">  53: </span><span><span id="m53">0               </span></span></p><p class="mem"><span class="loc">  54: </span><span><span id="m54">0               </span></span></p><p class="mem"><span class="loc">  55: </span><span><span id="m55">0               </span></span></p><p class="mem"><span class="loc">  56: </span><span><span id="m56">0               </span></span></p><p class="mem"><span class="loc">  57: </span><span><span id="m57">0               </span></span></p><p class="mem"><span class="loc">  58: </span><span><span id="m58">0               </span></span></p><p class="mem"><span class="loc">  59: </span><span><span id="m59">0               </span></span></p><p class="mem"><span class="loc">  60: </span><span><span id="m60">0               </span></span></p><p class="mem"><span class="loc">  61: </span><span><span id="m61">0               </span></span></p><p class="mem"><span class="loc">  62: </span><span><span id="m62">0               </span></span></p><p class="mem"><span class="loc">  63: </span><span><span id="m63">0               </span></span></p><p class="mem"><span class="loc">  64: </span><span><span id="m64">0               </span></span></p><p class="mem"><span class="loc">  65: </span><span><span id="m65">0               </span></span></p><p class="mem"><span class="loc">  66: </span><span><span id="m66">0               </span></span></p><p class="mem"><span class="loc">  67: </span><span><span id="m67">0               </span></span></p><p class="mem"><span class="loc">  68: </span><span><span id="m68">0               </span></span></p><p class="mem"><span class="loc">  69: </span><span><span id="m69">0               </span></span></p><p class="mem"><span class="loc">  70: </span><span><span id="m70">0               </span></span></p><p class="mem"><span class="loc">  71: </span><span><span id="m71">0               </span></span></p><p class="mem"><span class="loc">  72: </span><span><span id="m72">0               </span></span></p><p class="mem"><span class="loc">  73: </span><span><span id="m73">0               </span></span></p><p class="mem"><span class="loc">  74: </span><span><span id="m74">0               </span></span></p><p class="mem"><span class="loc">  75: </span><span><span id="m75">0               </span></span></p><p class="mem"><span class="loc">  76: </span><span><span id="m76">0               </span></span></p><p class="mem"><span class="loc">  77: </span><span><span id="m77">0               </span></span></p><p class="mem"><span class="loc">  78: </span><span><span id="m78">0               </span></span></p><p class="mem"><span class="loc">  79: </span><span><span id="m79">0               </span></span></p><p class="mem"><span class="loc">  80: </span><span><span id="m80">0               </span></span></p><p class="mem"><span class="loc">  81: </span><span><span id="m81">0               </span></span></p><p class="mem"><span class="loc">  82: </span><span><span id="m82">0               </span></span></p><p class="mem"><span class="loc">  83: </span><span><span id="m83">0               </span></span></p><p class="mem"><span class="loc">  84: </span><span><span id="m84">0               </span></span></p><p class="mem"><span class="loc">  85: </span><span><span id="m85">0               </span></span></p><p class="mem"><span class="loc">  86: </span><span><span id="m86">0               </span></span></p><p class="mem"><span class="loc">  87: </span><span><span id="m87">0               </span></span></p><p class="mem"><span class="loc">  88: </span><span><span id="m88">0               </span></span></p><p class="mem"><span class="loc">  89: </span><span><span id="m89">0               </span></span></p><p class="mem"><span class="loc">  90: </span><span><span id="m90">0               </span></span></p><p class="mem"><span class="loc">  91: </span><span><span id="m91">0               </span></span></p><p class="mem"><span class="loc">  92: </span><span><span id="m92">0               </span></span></p><p class="mem"><span class="loc">  93: </span><span><span id="m93">0               </span></span></p><p class="mem"><span class="loc">  94: </span><span><span id="m94">0               </span></span></p><p class="mem"><span class="loc">  95: </span><span><span id="m95">0               </span></span></p><p class="mem"><span class="loc">  96: </span><span><span id="m96">0               </span></span></p><p class="mem"><span class="loc">  97: </span><span><span id="m97">0               </span></span></p><p class="mem"><span class="loc">  98: </span><span><span id="m98">0               </span></span></p><p class="mem"><span class="loc">  99: </span><span><span id="m99">0               </span></span></p><p class="mem"><span class="loc"> 100: </span><span><span id="m100">0               </span></span></p><p class="mem"><span class="loc"> 101: </span><span><span id="m101">0               </span></span></p><p class="mem"><span class="loc"> 102: </span><span><span id="m102">0               </span></span></p><p class="mem"><span class="loc"> 103: </span><span><span id="m103">0               </span></span></p><p class="mem"><span class="loc"> 104: </span><span><span id="m104">0               </span></span></p><p class="mem"><span class="loc"> 105: </span><span><span id="m105">0               </span></span></p><p class="mem"><span class="loc"> 106: </span><span><span id="m106">0               </span></span></p><p class="mem"><span class="loc"> 107: </span><span><span id="m107">0               </span></span></p><p class="mem"><span class="loc"> 108: </span><span><span id="m108">0               </span></span></p><p class="mem"><span class="loc"> 109: </span><span><span id="m109">0               </span></span></p><p class="mem"><span class="loc"> 110: </span><span><span id="m110">0               </span></span></p><p class="mem"><span class="loc"> 111: </span><span><span id="m111">0               </span></span></p><p class="mem"><span class="loc"> 112: </span><span><span id="m112">0               </span></span></p><p class="mem"><span class="loc"> 113: </span><span><span id="m113">0               </span></span></p><p class="mem"><span class="loc"> 114: </span><span><span id="m114">0               </span></span></p><p class="mem"><span class="loc"> 115: </span><span><span id="m115">0               </span></span></p><p class="mem"><span class="loc"> 116: </span><span><span id="m116">0               </span></span></p><p class="mem"><span class="loc"> 117: </span><span><span id="m117">0               </span></span></p><p class="mem"><span class="loc"> 118: </span><span><span id="m118">0               </span></span></p><p class="mem"><span class="loc"> 119: </span><span><span id="m119">0               </span></span></p><p class="mem"><span class="loc"> 120: </span><span><span id="m120">0               </span></span></p><p class="mem"><span class="loc"> 121: </span><span><span id="m121">0               </span></span></p><p class="mem"><span class="loc"> 122: </span><span><span id="m122">0               </span></span></p><p class="mem"><span class="loc"> 123: </span><span><span id="m123">0               </span></span></p><p class="mem"><span class="loc"> 124: </span><span><span id="m124">0               </span></span></p><p class="mem"><span class="loc"> 125: </span><span><span id="m125">0               </span></span></p><p class="mem"><span class="loc"> 126: </span><span><span id="m126">0               </span></span></p><p class="mem"><span class="loc"> 127: </span><span><span id="m127">0               </span></span></p><p class="mem"><span class="loc"> 128: </span><span><span id="m128">0               </span></span></p><p class="mem"><span class="loc"> 129: </span><span><span id="m129">0               </span></span></p><p class="mem"><span class="loc"> 130: </span><span><span id="m130">0               </span></span></p><p class="mem"><span class="loc"> 131: </span><span><span id="m131">0               </span></span></p><p class="mem"><span class="loc"> 132: </span><span><span id="m132">0               </span></span></p><p class="mem"><span class="loc"> 133: </span><span><span id="m133">0               </span></span></p><p class="mem"><span class="loc"> 134: </span><span><span id="m134">0               </span></span></p><p class="mem"><span class="loc"> 135: </span><span><span id="m135">0               </span></span></p><p class="mem"><span class="loc"> 136: </span><span><span id="m136">0               </span></span></p><p class="mem"><span class="loc"> 137: </span><span><span id="m137">0               </span></span></p><p class="mem"><span class="loc"> 138: </span><span><span id="m138">0               </span></span></p><p class="mem"><span class="loc"> 139: </span><span><span id="m139">0               </span></span></p><p class="mem"><span class="loc"> 140: </span><span><span id="m140">0               </span></span></p><p class="mem"><span class="loc"> 141: </span><span><span id="m141">0               </span></span></p><p class="mem"><span class="loc"> 142: </span><span><span id="m142">0               </span></span></p><p class="mem"><span class="loc"> 143: </span><span><span id="m143">0               </span></span></p><p class="mem"><span class="loc"> 144: </span><span><span id="m144">0               </span></span></p><p class="mem"><span class="loc"> 145: </span><span><span id="m145">0               </span></span></p><p class="mem"><span class="loc"> 146: </span><span><span id="m146">0               </span></span></p><p class="mem"><span class="loc"> 147: </span><span><span id="m147">0               </span></span></p><p class="mem"><span class="loc"> 148: </span><span><span id="m148">0               </span></span></p><p class="mem"><span class="loc"> 149: </span><span><span id="m149">0               </span></span></p><p class="mem"><span class="loc"> 150: </span><span><span id="m150">0               </span></span></p><p class="mem"><span class="loc"> 151: </span><span><span id="m151">0               </span></span></p><p class="mem"><span class="loc"> 152: </span><span><span id="m152">0               </span></span></p><p class="mem"><span class="loc"> 153: </span><span><span id="m153">0               </span></span></p><p class="mem"><span class="loc"> 154: </span><span><span id="m154">0               </span></span></p><p class="mem"><span class="loc"> 155: </span><span><span id="m155">0               </span></span></p><p class="mem"><span class="loc"> 156: </span><span><span id="m156">0               </span></span></p><p class="mem"><span class="loc"> 157: </span><span><span id="m157">0               </span></span></p><p class="mem"><span class="loc"> 158: </span><span><span id="m158">0               </span></span></p><p class="mem"><span class="loc"> 159: </span><span><span id="m159">0               </span></span></p><p class="mem"><span class="loc"> 160: </span><span><span id="m160">0               </span></span></p><p class="mem"><span class="loc"> 161: </span><span><span id="m161">0               </span></span></p><p class="mem"><span class="loc"> 162: </span><span><span id="m162">0               </span></span></p><p class="mem"><span class="loc"> 163: </span><span><span id="m163">0               </span></span></p><p class="mem"><span class="loc"> 164: </span><span><span id="m164">0               </span></span></p><p class="mem"><span class="loc"> 165: </span><span><span id="m165">0               </span></span></p><p class="mem"><span class="loc"> 166: </span><span><span id="m166">0               </span></span></p><p class="mem"><span class="loc"> 167: </span><span><span id="m167">0               </span></span></p><p class="mem"><span class="loc"> 168: </span><span><span id="m168">0               </span></span></p><p class="mem"><span class="loc"> 169: </span><span><span id="m169">0               </span></span></p><p class="mem"><span class="loc"> 170: </span><span><span id="m170">0               </span></span></p><p class="mem"><span class="loc"> 171: </span><span><span id="m171">0               </span></span></p><p class="mem"><span class="loc"> 172: </span><span><span id="m172">0               </span></span></p><p class="mem"><span class="loc"> 173: </span><span><span id="m173">0               </span></span></p><p class="mem"><span class="loc"> 174: </span><span><span id="m174">0               </span></span></p><p class="mem"><span class="loc"> 175: </span><span><span id="m175">0               </span></span></p><p class="mem"><span class="loc"> 176: </span><span><span id="m176">0               </span></span></p><p class="mem"><span class="loc"> 177: </span><span><span id="m177">0               </span></span></p><p class="mem"><span class="loc"> 178: </span><span><span id="m178">0               </span></span></p><p class="mem"><span class="loc"> 179: </span><span><span id="m179">0               </span></span></p><p class="mem"><span class="loc"> 180: </span><span><span id="m180">0               </span></span></p><p class="mem"><span class="loc"> 181: </span><span><span id="m181">0               </span></span></p><p class="mem"><span class="loc"> 182: </span><span><span id="m182">0               </span></span></p><p class="mem"><span class="loc"> 183: </span><span><span id="m183">0               </span></span></p><p class="mem"><span class="loc"> 184: </span><span><span id="m184">0               </span></span></p><p class="mem"><span class="loc"> 185: </span><span><span id="m185">0               </span></span></p><p class="mem"><span class="loc"> 186: </span><span><span id="m186">0               </span></span></p><p class="mem"><span class="loc"> 187: </span><span><span id="m187">0               </span></span></p><p class="mem"><span class="loc"> 188: </span><span><span id="m188">0               </span></span></p><p class="mem"><span class="loc"> 189: </span><span><span id="m189">0               </span></span></p><p class="mem"><span class="loc"> 190: </span><span><span id="m190">0               </span></span></p><p class="mem"><span class="loc"> 191: </span><span><span id="m191">0               </span></span></p><p class="mem"><span class="loc"> 192: </span><span><span id="m192">0               </span></span></p><p class="mem"><span class="loc"> 193: </span><span><span id="m193">0               </span></span></p><p class="mem"><span class="loc"> 194: </span><span><span id="m194">0               </span></span></p><p class="mem"><span class="loc"> 195: </span><span><span id="m195">0               </span></span></p><p class="mem"><span class="loc"> 196: </span><span><span id="m196">0               </span></span></p><p class="mem"><span class="loc"> 197: </span><span><span id="m197">0               </span></span></p><p class="mem"><span class="loc"> 198: </span><span><span id="m198">0               </span></span></p><p class="mem"><span class="loc"> 199: </span><span><span id="m199">0               </span></span></p><p class="mem"><span class="loc"> 200: </span><span><span id="m200">0               </span></span></p><p class="mem"><span class="loc"> 201: </span><span><span id="m201">0               </span></span></p><p class="mem"><span class="loc"> 202: </span><span><span id="m202">0               </span></span></p><p class="mem"><span class="loc"> 203: </span><span><span id="m203">0               </span></span></p><p class="mem"><span class="loc"> 204: </span><span><span id="m204">0               </span></span></p><p class="mem"><span class="loc"> 205: </span><span><span id="m205">0               </span></span></p><p class="mem"><span class="loc"> 206: </span><span><span id="m206">0               </span></span></p><p class="mem"><span class="loc"> 207: </span><span><span id="m207">0               </span></span></p><p class="mem"><span class="loc"> 208: </span><span><span id="m208">0               </span></span></p><p class="mem"><span class="loc"> 209: </span><span><span id="m209">0               </span></span></p><p class="mem"><span class="loc"> 210: </span><span><span id="m210">0               </span></span></p><p class="mem"><span class="loc"> 211: </span><span><span id="m211">0               </span></span></p><p class="mem"><span class="loc"> 212: </span><span><span id="m212">0               </span></span></p><p class="mem"><span class="loc"> 213: </span><span><span id="m213">0               </span></span></p><p class="mem"><span class="loc"> 214: </span><span><span id="m214">0               </span></span></p><p class="mem"><span class="loc"> 215: </span><span><span id="m215">0               </span></span></p><p class="mem"><span class="loc"> 216: </span><span><span id="m216">0               </span></span></p><p class="mem"><span class="loc"> 217: </span><span><span id="m217">0               </span></span></p><p class="mem"><span class="loc"> 218: </span><span><span id="m218">0               </span></span></p><p class="mem"><span class="loc"> 219: </span><span><span id="m219">0               </span></span></p><p class="mem"><span class="loc"> 220: </span><span><span id="m220">0               </span></span></p><p class="mem"><span class="loc"> 221: </span><span><span id="m221">0               </span></span></p><p class="mem"><span class="loc"> 222: </span><span><span id="m222">0               </span></span></p><p class="mem"><span class="loc"> 223: </span><span><span id="m223">0               </span></span></p><p class="mem"><span class="loc"> 224: </span><span><span id="m224">0               </span></span></p><p class="mem"><span class="loc"> 225: </span><span><span id="m225">0               </span></span></p><p class="mem"><span class="loc"> 226: </span><span><span id="m226">0               </span></span></p><p class="mem"><span class="loc"> 227: </span><span><span id="m227">0               </span></span></p><p class="mem"><span class="loc"> 228: </span><span><span id="m228">0               </span></span></p><p class="mem"><span class="loc"> 229: </span><span><span id="m229">0               </span></span></p><p class="mem"><span class="loc"> 230: </span><span><span id="m230">0               </span></span></p><p class="mem"><span class="loc"> 231: </span><span><span id="m231">0               </span></span></p><p class="mem"><span class="loc"> 232: </span><span><span id="m232">0               </span></span></p><p class="mem"><span class="loc"> 233: </span><span><span id="m233">0               </span></span></p><p class="mem"><span class="loc"> 234: </span><span><span id="m234">0               </span></span></p><p class="mem"><span class="loc"> 235: </span><span><span id="m235">0               </span></span></p><p class="mem"><span class="loc"> 236: </span><span><span id="m236">0               </span></span></p><p class="mem"><span class="loc"> 237: </span><span><span id="m237">0               </span></span></p><p class="mem"><span class="loc"> 238: </span><span><span id="m238">0               </span></span></p><p class="mem"><span class="loc"> 239: </span><span><span id="m239">0               </span></span></p><p class="mem"><span class="loc"> 240: </span><span><span id="m240">0               </span></span></p><p class="mem"><span class="loc"> 241: </span><span><span id="m241">0               </span></span></p><p class="mem"><span class="loc"> 242: </span><span><span id="m242">0               </span></span></p><p class="mem"><span class="loc"> 243: </span><span><span id="m243">0               </span></span></p><p class="mem"><span class="loc"> 244: </span><span><span id="m244">0               </span></span></p><p class="mem"><span class="loc"> 245: </span><span><span id="m245">0               </span></span></p><p class="mem"><span class="loc"> 246: </span><span><span id="m246">0               </span></span></p><p class="mem"><span class="loc"> 247: </span><span><span id="m247">0               </span></span></p><p class="mem"><span class="loc"> 248: </span><span><span id="m248">0               </span></span></p><p class="mem"><span class="loc"> 249: </span><span><span id="m249">0               </span></span></p><p class="mem"><span class="loc"> 250: </span><span><span id="m250">0               </span></span></p><p class="mem"><span class="loc"> 251: </span><span><span id="m251">0               </span></span></p><p class="mem"><span class="loc"> 252: </span><span><span id="m252">0               </span></span></p><p class="mem"><span class="loc"> 253: </span><span><span id="m253">0               </span></span></p><p class="mem"><span class="loc"> 254: </span><span><span id="m254">0               </span></span></p><p class="mem"><span class="loc"> 255: </span><span><span id="m255">0               </span></span></p><p class="mem"><span class="loc"> 256: </span><span><span id="m256">0               </span></span></p><p class="mem"><span class="loc"> 257: </span><span><span id="m257">0               </span></span></p><p class="mem"><span class="loc"> 258: </span><span><span id="m258">0               </span></span></p><p class="mem"><span class="loc"> 259: </span><span><span id="m259">0               </span></span></p><p class="mem"><span class="loc"> 260: </span><span><span id="m260">0               </span></span></p><p class="mem"><span class="loc"> 261: </span><span><span id="m261">0               </span></span></p><p class="mem"><span class="loc"> 262: </span><span><span id="m262">0               </span></span></p><p class="mem"><span class="loc"> 263: </span><span><span id="m263">0               </span></span></p><p class="mem"><span class="loc"> 264: </span><span><span id="m264">0               </span></span></p><p class="mem"><span class="loc"> 265: </span><span><span id="m265">0               </span></span></p><p class="mem"><span class="loc"> 266: </span><span><span id="m266">0               </span></span></p><p class="mem"><span class="loc"> 267: </span><span><span id="m267">0               </span></span></p><p class="mem"><span class="loc"> 268: </span><span><span id="m268">0               </span></span></p><p class="mem"><span class="loc"> 269: </span><span><span id="m269">0               </span></span></p><p class="mem"><span class="loc"> 270: </span><span><span id="m270">0               </span></span></p><p class="mem"><span class="loc"> 271: </span><span><span id="m271">0               </span></span></p><p class="mem"><span class="loc"> 272: </span><span><span id="m272">0               </span></span></p><p class="mem"><span class="loc"> 273: </span><span><span id="m273">0               </span></span></p><p class="mem"><span class="loc"> 274: </span><span><span id="m274">0               </span></span></p><p class="mem"><span class="loc"> 275: </span><span><span id="m275">0               </span></span></p><p class="mem"><span class="loc"> 276: </span><span><span id="m276">0               </span></span></p><p class="mem"><span class="loc"> 277: </span><span><span id="m277">0               </span></span></p><p class="mem"><span class="loc"> 278: </span><span><span id="m278">0               </span></span></p><p class="mem"><span class="loc"> 279: </span><span><span id="m279">0               </span></span></p><p class="mem"><span class="loc"> 280: </span><span><span id="m280">0               </span></span></p><p class="mem"><span class="loc"> 281: </span><span><span id="m281">0               </span></span></p><p class="mem"><span class="loc"> 282: </span><span><span id="m282">0               </span></span></p><p class="mem"><span class="loc"> 283: </span><span><span id="m283">0               </span></span></p><p class="mem"><span class="loc"> 284: </span><span><span id="m284">0               </span></span></p><p class="mem"><span class="loc"> 285: </span><span><span id="m285">0               </span></span></p><p class="mem"><span class="loc"> 286: </span><span><span id="m286">0               </span></span></p><p class="mem"><span class="loc"> 287: </span><span><span id="m287">0               </span></span></p><p class="mem"><span class="loc"> 288: </span><span><span id="m288">0               </span></span></p><p class="mem"><span class="loc"> 289: </span><span><span id="m289">0               </span></span></p><p class="mem"><span class="loc"> 290: </span><span><span id="m290">0               </span></span></p><p class="mem"><span class="loc"> 291: </span><span><span id="m291">0               </span></span></p><p class="mem"><span class="loc"> 292: </span><span><span id="m292">0               </span></span></p><p class="mem"><span class="loc"> 293: </span><span><span id="m293">0               </span></span></p><p class="mem"><span class="loc"> 294: </span><span><span id="m294">0               </span></span></p><p class="mem"><span class="loc"> 295: </span><span><span id="m295">0               </span></span></p><p class="mem"><span class="loc"> 296: </span><span><span id="m296">0               </span></span></p><p class="mem"><span class="loc"> 297: </span><span><span id="m297">0               </span></span></p><p class="mem"><span class="loc"> 298: </span><span><span id="m298">0               </span></span></p><p class="mem"><span class="loc"> 299: </span><span><span id="m299">0               </span></span></p><p class="mem"><span class="loc"> 300: </span><span><span id="m300">0               </span></span></p><p class="mem"><span class="loc"> 301: </span><span><span id="m301">0               </span></span></p><p class="mem"><span class="loc"> 302: </span><span><span id="m302">0               </span></span></p><p class="mem"><span class="loc"> 303: </span><span><span id="m303">0               </span></span></p><p class="mem"><span class="loc"> 304: </span><span><span id="m304">0               </span></span></p><p class="mem"><span class="loc"> 305: </span><span><span id="m305">0               </span></span></p><p class="mem"><span class="loc"> 306: </span><span><span id="m306">0               </span></span></p><p class="mem"><span class="loc"> 307: </span><span><span id="m307">0               </span></span></p><p class="mem"><span class="loc"> 308: </span><span><span id="m308">0               </span></span></p><p class="mem"><span class="loc"> 309: </span><span><span id="m309">0               </span></span></p><p class="mem"><span class="loc"> 310: </span><span><span id="m310">0               </span></span></p><p class="mem"><span class="loc"> 311: </span><span><span id="m311">0               </span></span></p><p class="mem"><span class="loc"> 312: </span><span><span id="m312">0               </span></span></p><p class="mem"><span class="loc"> 313: </span><span><span id="m313">0               </span></span></p><p class="mem"><span class="loc"> 314: </span><span><span id="m314">0               </span></span></p><p class="mem"><span class="loc"> 315: </span><span><span id="m315">0               </span></span></p><p class="mem"><span class="loc"> 316: </span><span><span id="m316">0               </span></span></p><p class="mem"><span class="loc"> 317: </span><span><span id="m317">0               </span></span></p><p class="mem"><span class="loc"> 318: </span><span><span id="m318">0               </span></span></p><p class="mem"><span class="loc"> 319: </span><span><span id="m319">0               </span></span></p><p class="mem"><span class="loc"> 320: </span><span><span id="m320">0               </span></span></p><p class="mem"><span class="loc"> 321: </span><span><span id="m321">0               </span></span></p><p class="mem"><span class="loc"> 322: </span><span><span id="m322">0               </span></span></p><p class="mem"><span class="loc"> 323: </span><span><span id="m323">0               </span></span></p><p class="mem"><span class="loc"> 324: </span><span><span id="m324">0               </span></span></p><p class="mem"><span class="loc"> 325: </span><span><span id="m325">0               </span></span></p><p class="mem"><span class="loc"> 326: </span><span><span id="m326">0               </span></span></p><p class="mem"><span class="loc"> 327: </span><span><span id="m327">0               </span></span></p><p class="mem"><span class="loc"> 328: </span><span><span id="m328">0               </span></span></p><p class="mem"><span class="loc"> 329: </span><span><span id="m329">0               </span></span></p><p class="mem"><span class="loc"> 330: </span><span><span id="m330">0               </span></span></p><p class="mem"><span class="loc"> 331: </span><span><span id="m331">0               </span></span></p><p class="mem"><span class="loc"> 332: </span><span><span id="m332">0               </span></span></p><p class="mem"><span class="loc"> 333: </span><span><span id="m333">0               </span></span></p><p class="mem"><span class="loc"> 334: </span><span><span id="m334">0               </span></span></p><p class="mem"><span class="loc"> 335: </span><span><span id="m335">0               </span></span></p><p class="mem"><span class="loc"> 336: </span><span><span id="m336">0               </span></span></p><p class="mem"><span class="loc"> 337: </span><span><span id="m337">0               </span></span></p><p class="mem"><span class="loc"> 338: </span><span><span id="m338">0               </span></span></p><p class="mem"><span class="loc"> 339: </span><span><span id="m339">0               </span></span></p><p class="mem"><span class="loc"> 340: </span><span><span id="m340">0               </span></span></p><p class="mem"><span class="loc"> 341: </span><span><span id="m341">0               </span></span></p><p class="mem"><span class="loc"> 342: </span><span><span id="m342">0               </span></span></p><p class="mem"><span class="loc"> 343: </span><span><span id="m343">0               </span></span></p><p class="mem"><span class="loc"> 344: </span><span><span id="m344">0               </span></span></p><p class="mem"><span class="loc"> 345: </span><span><span id="m345">0               </span></span></p><p class="mem"><span class="loc"> 346: </span><span><span id="m346">0               </span></span></p><p class="mem"><span class="loc"> 347: </span><span><span id="m347">0               </span></span></p><p class="mem"><span class="loc"> 348: </span><span><span id="m348">0               </span></span></p><p class="mem"><span class="loc"> 349: </span><span><span id="m349">0               </span></span></p><p class="mem"><span class="loc"> 350: </span><span><span id="m350">0               </span></span></p><p class="mem"><span class="loc"> 351: </span><span><span id="m351">0               </span></span></p><p class="mem"><span class="loc"> 352: </span><span><span id="m352">0               </span></span></p><p class="mem"><span class="loc"> 353: </span><span><span id="m353">0               </span></span></p><p class="mem"><span class="loc"> 354: </span><span><span id="m354">0               </span></span></p><p class="mem"><span class="loc"> 355: </span><span><span id="m355">0               </span></span></p><p class="mem"><span class="loc"> 356: </span><span><span id="m356">0               </span></span></p><p class="mem"><span class="loc"> 357: </span><span><span id="m357">0               </span></span></p><p class="mem"><span class="loc"> 358: </span><span><span id="m358">0               </span></span></p><p class="mem"><span class="loc"> 359: </span><span><span id="m359">0               </span></span></p><p class="mem"><span class="loc"> 360: </span><span><span id="m360">0               </span></span></p><p class="mem"><span class="loc"> 361: </span><span><span id="m361">0               </span></span></p><p class="mem"><span class="loc"> 362: </span><span><span id="m362">0               </span></span></p><p class="mem"><span class="loc"> 363: </span><span><span id="m363">0               </span></span></p><p class="mem"><span class="loc"> 364: </span><span><span id="m364">0               </span></span></p><p class="mem"><span class="loc"> 365: </span><span><span id="m365">0               </span></span></p><p class="mem"><span class="loc"> 366: </span><span><span id="m366">0               </span></span></p><p class="mem"><span class="loc"> 367: </span><span><span id="m367">0               </span></span></p><p class="mem"><span class="loc"> 368: </span><span><span id="m368">0               </span></span></p><p class="mem"><span class="loc"> 369: </span><span><span id="m369">0               </span></span></p><p class="mem"><span class="loc"> 370: </span><span><span id="m370">0               </span></span></p><p class="mem"><span class="loc"> 371: </span><span><span id="m371">0               </span></span></p><p class="mem"><span class="loc"> 372: </span><span><span id="m372">0               </span></span></p><p class="mem"><span class="loc"> 373: </span><span><span id="m373">0               </span></span></p><p class="mem"><span class="loc"> 374: </span><span><span id="m374">0               </span></span></p><p class="mem"><span class="loc"> 375: </span><span><span id="m375">0               </span></span></p><p class="mem"><span class="loc"> 376: </span><span><span id="m376">0               </span></span></p><p class="mem"><span class="loc"> 377: </span><span><span id="m377">0               </span></span></p><p class="mem"><span class="loc"> 378: </span><span><span id="m378">0               </span></span></p><p class="mem"><span class="loc"> 379: </span><span><span id="m379">0               </span></span></p><p class="mem"><span class="loc"> 380: </span><span><span id="m380">0               </span></span></p><p class="mem"><span class="loc"> 381: </span><span><span id="m381">0               </span></span></p><p class="mem"><span class="loc"> 382: </span><span><span id="m382">0               </span></span></p><p class="mem"><span class="loc"> 383: </span><span><span id="m383">0               </span></span></p><p class="mem"><span class="loc"> 384: </span><span><span id="m384">0               </span></span></p><p class="mem"><span class="loc"> 385: </span><span><span id="m385">0               </span></span></p><p class="mem"><span class="loc"> 386: </span><span><span id="m386">0               </span></span></p><p class="mem"><span class="loc"> 387: </span><span><span id="m387">0               </span></span></p><p class="mem"><span class="loc"> 388: </span><span><span id="m388">0               </span></span></p><p class="mem"><span class="loc"> 389: </span><span><span id="m389">0               </span></span></p><p class="mem"><span class="loc"> 390: </span><span><span id="m390">0               </span></span></p><p class="mem"><span class="loc"> 391: </span><span><span id="m391">0               </span></span></p><p class="mem"><span class="loc"> 392: </span><span><span id="m392">0               </span></span></p><p class="mem"><span class="loc"> 393: </span><span><span id="m393">0               </span></span></p><p class="mem"><span class="loc"> 394: </span><span><span id="m394">0               </span></span></p><p class="mem"><span class="loc"> 395: </span><span><span id="m395">0               </span></span></p><p class="mem"><span class="loc"> 396: </span><span><span id="m396">0               </span></span></p><p class="mem"><span class="loc"> 397: </span><span><span id="m397">0               </span></span></p><p class="mem"><span class="loc"> 398: </span><span><span id="m398">0               </span></span></p><p class="mem"><span class="loc"> 399: </span><span><span id="m399">0               </span></span></p><p class="mem"><span class="loc"> 400: </span><span><span id="m400">0               </span></span></p><p class="mem"><span class="loc"> 401: </span><span><span id="m401">0               </span></span></p><p class="mem"><span class="loc"> 402: </span><span><span id="m402">0               </span></span></p><p class="mem"><span class="loc"> 403: </span><span><span id="m403">0               </span></span></p><p class="mem"><span class="loc"> 404: </span><span><span id="m404">0               </span></span></p><p class="mem"><span class="loc"> 405: </span><span><span id="m405">0               </span></span></p><p class="mem"><span class="loc"> 406: </span><span><span id="m406">0               </span></span></p><p class="mem"><span class="loc"> 407: </span><span><span id="m407">0               </span></span></p><p class="mem"><span class="loc"> 408: </span><span><span id="m408">0               </span></span></p><p class="mem"><span class="loc"> 409: </span><span><span id="m409">0               </span></span></p><p class="mem"><span class="loc"> 410: </span><span><span id="m410">0               </span></span></p><p class="mem"><span class="loc"> 411: </span><span><span id="m411">0               </span></span></p><p class="mem"><span class="loc"> 412: </span><span><span id="m412">0               </span></span></p><p class="mem"><span class="loc"> 413: </span><span><span id="m413">0               </span></span></p><p class="mem"><span class="loc"> 414: </span><span><span id="m414">0               </span></span></p><p class="mem"><span class="loc"> 415: </span><span><span id="m415">0               </span></span></p><p class="mem"><span class="loc"> 416: </span><span><span id="m416">0               </span></span></p><p class="mem"><span class="loc"> 417: </span><span><span id="m417">0               </span></span></p><p class="mem"><span class="loc"> 418: </span><span><span id="m418">0               </span></span></p><p class="mem"><span class="loc"> 419: </span><span><span id="m419">0               </span></span></p><p class="mem"><span class="loc"> 420: </span><span><span id="m420">0               </span></span></p><p class="mem"><span class="loc"> 421: </span><span><span id="m421">0               </span></span></p><p class="mem"><span class="loc"> 422: </span><span><span id="m422">0               </span></span></p><p class="mem"><span class="loc"> 423: </span><span><span id="m423">0               </span></span></p><p class="mem"><span class="loc"> 424: </span><span><span id="m424">0               </span></span></p><p class="mem"><span class="loc"> 425: </span><span><span id="m425">0               </span></span></p><p class="mem"><span class="loc"> 426: </span><span><span id="m426">0               </span></span></p><p class="mem"><span class="loc"> 427: </span><span><span id="m427">0               </span></span></p><p class="mem"><span class="loc"> 428: </span><span><span id="m428">0               </span></span></p><p class="mem"><span class="loc"> 429: </span><span><span id="m429">0               </span></span></p><p class="mem"><span class="loc"> 430: </span><span><span id="m430">0               </span></span></p><p class="mem"><span class="loc"> 431: </span><span><span id="m431">0               </span></span></p><p class="mem"><span class="loc"> 432: </span><span><span id="m432">0               </span></span></p><p class="mem"><span class="loc"> 433: </span><span><span id="m433">0               </span></span></p><p class="mem"><span class="loc"> 434: </span><span><span id="m434">0               </span></span></p><p class="mem"><span class="loc"> 435: </span><span><span id="m435">0               </span></span></p><p class="mem"><span class="loc"> 436: </span><span><span id="m436">0               </span></span></p><p class="mem"><span class="loc"> 437: </span><span><span id="m437">0               </span></span></p><p class="mem"><span class="loc"> 438: </span><span><span id="m438">0               </span></span></p><p class="mem"><span class="loc"> 439: </span><span><span id="m439">0               </span></span></p><p class="mem"><span class="loc"> 440: </span><span><span id="m440">0               </span></span></p><p class="mem"><span class="loc"> 441: </span><span><span id="m441">0               </span></span></p><p class="mem"><span class="loc"> 442: </span><span><span id="m442">0               </span></span></p><p class="mem"><span class="loc"> 443: </span><span><span id="m443">0               </span></span></p><p class="mem"><span class="loc"> 444: </span><span><span id="m444">0               </span></span></p><p class="mem"><span class="loc"> 445: </span><span><span id="m445">0               </span></span></p><p class="mem"><span class="loc"> 446: </span><span><span id="m446">0               </span></span></p><p class="mem"><span class="loc"> 447: </span><span><span id="m447">0               </span></span></p><p class="mem"><span class="loc"> 448: </span><span><span id="m448">0               </span></span></p><p class="mem"><span class="loc"> 449: </span><span><span id="m449">0               </span></span></p><p class="mem"><span class="loc"> 450: </span><span><span id="m450">0               </span></span></p><p class="mem"><span class="loc"> 451: </span><span><span id="m451">0               </span></span></p><p class="mem"><span class="loc"> 452: </span><span><span id="m452">0               </span></span></p><p class="mem"><span class="loc"> 453: </span><span><span id="m453">0               </span></span></p><p class="mem"><span class="loc"> 454: </span><span><span id="m454">0               </span></span></p><p class="mem"><span class="loc"> 455: </span><span><span id="m455">0               </span></span></p><p class="mem"><span class="loc"> 456: </span><span><span id="m456">0               </span></span></p><p class="mem"><span class="loc"> 457: </span><span><span id="m457">0               </span></span></p><p class="mem"><span class="loc"> 458: </span><span><span id="m458">0               </span></span></p><p class="mem"><span class="loc"> 459: </span><span><span id="m459">0               </span></span></p><p class="mem"><span class="loc"> 460: </span><span><span id="m460">0               </span></span></p><p class="mem"><span class="loc"> 461: </span><span><span id="m461">0               </span></span></p><p class="mem"><span class="loc"> 462: </span><span><span id="m462">0               </span></span></p><p class="mem"><span class="loc"> 463: </span><span><span id="m463">0               </span></span></p><p class="mem"><span class="loc"> 464: </span><span><span id="m464">0               </span></span></p><p class="mem"><span class="loc"> 465: </span><span><span id="m465">0               </span></span></p><p class="mem"><span class="loc"> 466: </span><span><span id="m466">0               </span></span></p><p class="mem"><span class="loc"> 467: </span><span><span id="m467">0               </span></span></p><p class="mem"><span class="loc"> 468: </span><span><span id="m468">0               </span></span></p><p class="mem"><span class="loc"> 469: </span><span><span id="m469">0               </span></span></p><p class="mem"><span class="loc"> 470: </span><span><span id="m470">0               </span></span></p><p class="mem"><span class="loc"> 471: </span><span><span id="m471">0               </span></span></p><p class="mem"><span class="loc"> 472: </span><span><span id="m472">0               </span></span></p><p class="mem"><span class="loc"> 473: </span><span><span id="m473">0               </span></span></p><p class="mem"><span class="loc"> 474: </span><span><span id="m474">0               </span></span></p><p class="mem"><span class="loc"> 475: </span><span><span id="m475">0               </span></span></p><p class="mem"><span class="loc"> 476: </span><span><span id="m476">0               </span></span></p><p class="mem"><span class="loc"> 477: </span><span><span id="m477">0               </span></span></p><p class="mem"><span class="loc"> 478: </span><span><span id="m478">0               </span></span></p><p class="mem"><span class="loc"> 479: </span><span><span id="m479">0               </span></span></p><p class="mem"><span class="loc"> 480: </span><span><span id="m480">0               </span></span></p><p class="mem"><span class="loc"> 481: </span><span><span id="m481">0               </span></span></p><p class="mem"><span class="loc"> 482: </span><span><span id="m482">0               </span></span></p><p class="mem"><span class="loc"> 483: </span><span><span id="m483">0               </span></span></p><p class="mem"><span class="loc"> 484: </span><span><span id="m484">0               </span></span></p><p class="mem"><span class="loc"> 485: </span><span><span id="m485">0               </span></span></p><p class="mem"><span class="loc"> 486: </span><span><span id="m486">0               </span></span></p><p class="mem"><span class="loc"> 487: </span><span><span id="m487">0               </span></span></p><p class="mem"><span class="loc"> 488: </span><span><span id="m488">0               </span></span></p><p class="mem"><span class="loc"> 489: </span><span><span id="m489">0               </span></span></p><p class="mem"><span class="loc"> 490: </span><span><span id="m490">0               </span></span></p><p class="mem"><span class="loc"> 491: </span><span><span id="m491">0               </span></span></p><p class="mem"><span class="loc"> 492: </span><span><span id="m492">0               </span></span></p><p class="mem"><span class="loc"> 493: </span><span><span id="m493">0               </span></span></p><p class="mem"><span class="loc"> 494: </span><span><span id="m494">0               </span></span></p><p class="mem"><span class="loc"> 495: </span><span><span id="m495">0               </span></span></p><p class="mem"><span class="loc"> 496: </span><span><span id="m496">0               </span></span></p><p class="mem"><span class="loc"> 497: </span><span><span id="m497">0               </span></span></p><p class="mem"><span class="loc"> 498: </span><span><span id="m498">0               </span></span></p><p class="mem"><span class="loc"> 499: </span><span><span id="m499">0               </span></span></p><p class="mem"><span class="loc"> 500: </span><span><span id="m500">0               </span></span></p><p class="mem"><span class="loc"> 501: </span><span><span id="m501">0               </span></span></p><p class="mem"><span class="loc"> 502: </span><span><span id="m502">0               </span></span></p><p class="mem"><span class="loc"> 503: </span><span><span id="m503">0               </span></span></p><p class="mem"><span class="loc"> 504: </span><span><span id="m504">0               </span></span></p><p class="mem"><span class="loc"> 505: </span><span><span id="m505">0               </span></span></p><p class="mem"><span class="loc"> 506: </span><span><span id="m506">0               </span></span></p><p class="mem"><span class="loc"> 507: </span><span><span id="m507">0               </span></span></p><p class="mem"><span class="loc"> 508: </span><span><span id="m508">0               </span></span></p><p class="mem"><span class="loc"> 509: </span><span><span id="m509">0               </span></span></p><p class="mem"><span class="loc"> 510: </span><span><span id="m510">0               </span></span></p><p class="mem"><span class="loc"> 511: </span><span><span id="m511">0               </span></span></p><p class="mem"><span class="loc"> 512: </span><span><span id="m512">0               </span></span></p><p class="mem"><span class="loc"> 513: </span><span><span id="m513">0               </span></span></p><p class="mem"><span class="loc"> 514: </span><span><span id="m514">0               </span></span></p><p class="mem"><span class="loc"> 515: </span><span><span id="m515">0               </span></span></p><p class="mem"><span class="loc"> 516: </span><span><span id="m516">0               </span></span></p><p class="mem"><span class="loc"> 517: </span><span><span id="m517">0               </span></span></p><p class="mem"><span class="loc"> 518: </span><span><span id="m518">0               </span></span></p><p class="mem"><span class="loc"> 519: </span><span><span id="m519">0               </span></span></p><p class="mem"><span class="loc"> 520: </span><span><span id="m520">0               </span></span></p><p class="mem"><span class="loc"> 521: </span><span><span id="m521">0               </span></span></p><p class="mem"><span class="loc"> 522: </span><span><span id="m522">0               </span></span></p><p class="mem"><span class="loc"> 523: </span><span><span id="m523">0               </span></span></p><p class="mem"><span class="loc"> 524: </span><span><span id="m524">0               </span></span></p><p class="mem"><span class="loc"> 525: </span><span><span id="m525">0               </span></span></p><p class="mem"><span class="loc"> 526: </span><span><span id="m526">0               </span></span></p><p class="mem"><span class="loc"> 527: </span><span><span id="m527">0               </span></span></p><p class="mem"><span class="loc"> 528: </span><span><span id="m528">0               </span></span></p><p class="mem"><span class="loc"> 529: </span><span><span id="m529">0               </span></span></p><p class="mem"><span class="loc"> 530: </span><span><span id="m530">0               </span></span></p><p class="mem"><span class="loc"> 531: </span><span><span id="m531">0               </span></span></p><p class="mem"><span class="loc"> 532: </span><span><span id="m532">0               </span></span></p><p class="mem"><span class="loc"> 533: </span><span><span id="m533">0               </span></span></p><p class="mem"><span class="loc"> 534: </span><span><span id="m534">0               </span></span></p><p class="mem"><span class="loc"> 535: </span><span><span id="m535">0               </span></span></p><p class="mem"><span class="loc"> 536: </span><span><span id="m536">0               </span></span></p><p class="mem"><span class="loc"> 537: </span><span><span id="m537">0               </span></span></p><p class="mem"><span class="loc"> 538: </span><span><span id="m538">0               </span></span></p><p class="mem"><span class="loc"> 539: </span><span><span id="m539">0               </span></span></p><p class="mem"><span class="loc"> 540: </span><span><span id="m540">0               </span></span></p><p class="mem"><span class="loc"> 541: </span><span><span id="m541">0               </span></span></p><p class="mem"><span class="loc"> 542: </span><span><span id="m542">0               </span></span></p><p class="mem"><span class="loc"> 543: </span><span><span id="m543">0               </span></span></p><p class="mem"><span class="loc"> 544: </span><span><span id="m544">0               </span></span></p><p class="mem"><span class="loc"> 545: </span><span><span id="m545">0               </span></span></p><p class="mem"><span class="loc"> 546: </span><span><span id="m546">0               </span></span></p><p class="mem"><span class="loc"> 547: </span><span><span id="m547">0               </span></span></p><p class="mem"><span class="loc"> 548: </span><span><span id="m548">0               </span></span></p><p class="mem"><span class="loc"> 549: </span><span><span id="m549">0               </span></span></p><p class="mem"><span class="loc"> 550: </span><span><span id="m550">0               </span></span></p><p class="mem"><span class="loc"> 551: </span><span><span id="m551">0               </span></span></p><p class="mem"><span class="loc"> 552: </span><span><span id="m552">0               </span></span></p><p class="mem"><span class="loc"> 553: </span><span><span id="m553">0               </span></span></p><p class="mem"><span class="loc"> 554: </span><span><span id="m554">0               </span></span></p><p class="mem"><span class="loc"> 555: </span><span><span id="m555">0               </span></span></p><p class="mem"><span class="loc"> 556: </span><span><span id="m556">0               </span></span></p><p class="mem"><span class="loc"> 557: </span><span><span id="m557">0               </span></span></p><p class="mem"><span class="loc"> 558: </span><span><span id="m558">0               </span></span></p><p class="mem"><span class="loc"> 559: </span><span><span id="m559">0               </span></span></p><p class="mem"><span class="loc"> 560: </span><span><span id="m560">0               </span></span></p><p class="mem"><span class="loc"> 561: </span><span><span id="m561">0               </span></span></p><p class="mem"><span class="loc"> 562: </span><span><span id="m562">0               </span></span></p><p class="mem"><span class="loc"> 563: </span><span><span id="m563">0               </span></span></p><p class="mem"><span class="loc"> 564: </span><span><span id="m564">0               </span></span></p><p class="mem"><span class="loc"> 565: </span><span><span id="m565">0               </span></span></p><p class="mem"><span class="loc"> 566: </span><span><span id="m566">0               </span></span></p><p class="mem"><span class="loc"> 567: </span><span><span id="m567">0               </span></span></p><p class="mem"><span class="loc"> 568: </span><span><span id="m568">0               </span></span></p><p class="mem"><span class="loc"> 569: </span><span><span id="m569">0               </span></span></p><p class="mem"><span class="loc"> 570: </span><span><span id="m570">0               </span></span></p><p class="mem"><span class="loc"> 571: </span><span><span id="m571">0               </span></span></p><p class="mem"><span class="loc"> 572: </span><span><span id="m572">0               </span></span></p><p class="mem"><span class="loc"> 573: </span><span><span id="m573">0               </span></span></p><p class="mem"><span class="loc"> 574: </span><span><span id="m574">0               </span></span></p><p class="mem"><span class="loc"> 575: </span><span><span id="m575">0               </span></span></p><p class="mem"><span class="loc"> 576: </span><span><span id="m576">0               </span></span></p><p class="mem"><span class="loc"> 577: </span><span><span id="m577">0               </span></span></p><p class="mem"><span class="loc"> 578: </span><span><span id="m578">0               </span></span></p><p class="mem"><span class="loc"> 579: </span><span><span id="m579">0               </span></span></p><p class="mem"><span class="loc"> 580: </span><span><span id="m580">0               </span></span></p><p class="mem"><span class="loc"> 581: </span><span><span id="m581">0               </span></span></p><p class="mem"><span class="loc"> 582: </span><span><span id="m582">0               </span></span></p><p class="mem"><span class="loc"> 583: </span><span><span id="m583">0               </span></span></p><p class="mem"><span class="loc"> 584: </span><span><span id="m584">0               </span></span></p><p class="mem"><span class="loc"> 585: </span><span><span id="m585">0               </span></span></p><p class="mem"><span class="loc"> 586: </span><span><span id="m586">0               </span></span></p><p class="mem"><span class="loc"> 587: </span><span><span id="m587">0               </span></span></p><p class="mem"><span class="loc"> 588: </span><span><span id="m588">0               </span></span></p><p class="mem"><span class="loc"> 589: </span><span><span id="m589">0               </span></span></p><p class="mem"><span class="loc"> 590: </span><span><span id="m590">0               </span></span></p><p class="mem"><span class="loc"> 591: </span><span><span id="m591">0               </span></span></p><p class="mem"><span class="loc"> 592: </span><span><span id="m592">0               </span></span></p><p class="mem"><span class="loc"> 593: </span><span><span id="m593">0               </span></span></p><p class="mem"><span class="loc"> 594: </span><span><span id="m594">0               </span></span></p><p class="mem"><span class="loc"> 595: </span><span><span id="m595">0               </span></span></p><p class="mem"><span class="loc"> 596: </span><span><span id="m596">0               </span></span></p><p class="mem"><span class="loc"> 597: </span><span><span id="m597">0               </span></span></p><p class="mem"><span class="loc"> 598: </span><span><span id="m598">0               </span></span></p><p class="mem"><span class="loc"> 599: </span><span><span id="m599">0               </span></span></p><p class="mem"><span class="loc"> 600: </span><span><span id="m600">0               </span></span></p><p class="mem"><span class="loc"> 601: </span><span><span id="m601">0               </span></span></p><p class="mem"><span class="loc"> 602: </span><span><span id="m602">0               </span></span></p><p class="mem"><span class="loc"> 603: </span><span><span id="m603">0               </span></span></p><p class="mem"><span class="loc"> 604: </span><span><span id="m604">0               </span></span></p><p class="mem"><span class="loc"> 605: </span><span><span id="m605">0               </span></span></p><p class="mem"><span class="loc"> 606: </span><span><span id="m606">0               </span></span></p><p class="mem"><span class="loc"> 607: </span><span><span id="m607">0               </span></span></p><p class="mem"><span class="loc"> 608: </span><span><span id="m608">0               </span></span></p><p class="mem"><span class="loc"> 609: </span><span><span id="m609">0               </span></span></p><p class="mem"><span class="loc"> 610: </span><span><span id="m610">0               </span></span></p><p class="mem"><span class="loc"> 611: </span><span><span id="m611">0               </span></span></p><p class="mem"><span class="loc"> 612: </span><span><span id="m612">0               </span></span></p><p class="mem"><span class="loc"> 613: </span><span><span id="m613">0               </span></span></p><p class="mem"><span class="loc"> 614: </span><span><span id="m614">0               </span></span></p><p class="mem"><span class="loc"> 615: </span><span><span id="m615">0               </span></span></p><p class="mem"><span class="loc"> 616: </span><span><span id="m616">0               </span></span></p><p class="mem"><span class="loc"> 617: </span><span><span id="m617">0               </span></span></p><p class="mem"><span class="loc"> 618: </span><span><span id="m618">0               </span></span></p><p class="mem"><span class="loc"> 619: </span><span><span id="m619">0               </span></span></p><p class="mem"><span class="loc"> 620: </span><span><span id="m620">0               </span></span></p><p class="mem"><span class="loc"> 621: </span><span><span id="m621">0               </span></span></p><p class="mem"><span class="loc"> 622: </span><span><span id="m622">0               </span></span></p><p class="mem"><span class="loc"> 623: </span><span><span id="m623">0               </span></span></p><p class="mem"><span class="loc"> 624: </span><span><span id="m624">0               </span></span></p><p class="mem"><span class="loc"> 625: </span><span><span id="m625">0               </span></span></p><p class="mem"><span class="loc"> 626: </span><span><span id="m626">0               </span></span></p><p class="mem"><span class="loc"> 627: </span><span><span id="m627">0               </span></span></p><p class="mem"><span class="loc"> 628: </span><span><span id="m628">0               </span></span></p><p class="mem"><span class="loc"> 629: </span><span><span id="m629">0               </span></span></p><p class="mem"><span class="loc"> 630: </span><span><span id="m630">0               </span></span></p><p class="mem"><span class="loc"> 631: </span><span><span id="m631">0               </span></span></p><p class="mem"><span class="loc"> 632: </span><span><span id="m632">0               </span></span></p><p class="mem"><span class="loc"> 633: </span><span><span id="m633">0               </span></span></p><p class="mem"><span class="loc"> 634: </span><span><span id="m634">0               </span></span></p><p class="mem"><span class="loc"> 635: </span><span><span id="m635">0               </span></span></p><p class="mem"><span class="loc"> 636: </span><span><span id="m636">0               </span></span></p><p class="mem"><span class="loc"> 637: </span><span><span id="m637">0               </span></span></p><p class="mem"><span class="loc"> 638: </span><span><span id="m638">0               </span></span></p><p class="mem"><span class="loc"> 639: </span><span><span id="m639">0               </span></span></p><p class="mem"><span class="loc"> 640: </span><span><span id="m640">0               </span></span></p><p class="mem"><span class="loc"> 641: </span><span><span id="m641">0               </span></span></p><p class="mem"><span class="loc"> 642: </span><span><span id="m642">0               </span></span></p><p class="mem"><span class="loc"> 643: </span><span><span id="m643">0               </span></span></p><p class="mem"><span class="loc"> 644: </span><span><span id="m644">0               </span></span></p><p class="mem"><span class="loc"> 645: </span><span><span id="m645">0               </span></span></p><p class="mem"><span class="loc"> 646: </span><span><span id="m646">0               </span></span></p><p class="mem"><span class="loc"> 647: </span><span><span id="m647">0               </span></span></p><p class="mem"><span class="loc"> 648: </span><span><span id="m648">0               </span></span></p><p class="mem"><span class="loc"> 649: </span><span><span id="m649">0               </span></span></p><p class="mem"><span class="loc"> 650: </span><span><span id="m650">0               </span></span></p><p class="mem"><span class="loc"> 651: </span><span><span id="m651">0               </span></span></p><p class="mem"><span class="loc"> 652: </span><span><span id="m652">0               </span></span></p><p class="mem"><span class="loc"> 653: </span><span><span id="m653">0               </span></span></p><p class="mem"><span class="loc"> 654: </span><span><span id="m654">0               </span></span></p><p class="mem"><span class="loc"> 655: </span><span><span id="m655">0               </span></span></p><p class="mem"><span class="loc"> 656: </span><span><span id="m656">0               </span></span></p><p class="mem"><span class="loc"> 657: </span><span><span id="m657">0               </span></span></p><p class="mem"><span class="loc"> 658: </span><span><span id="m658">0               </span></span></p><p class="mem"><span class="loc"> 659: </span><span><span id="m659">0               </span></span></p><p class="mem"><span class="loc"> 660: </span><span><span id="m660">0               </span></span></p><p class="mem"><span class="loc"> 661: </span><span><span id="m661">0               </span></span></p><p class="mem"><span class="loc"> 662: </span><span><span id="m662">0               </span></span></p><p class="mem"><span class="loc"> 663: </span><span><span id="m663">0               </span></span></p><p class="mem"><span class="loc"> 664: </span><span><span id="m664">0               </span></span></p><p class="mem"><span class="loc"> 665: </span><span><span id="m665">0               </span></span></p><p class="mem"><span class="loc"> 666: </span><span><span id="m666">0               </span></span></p><p class="mem"><span class="loc"> 667: </span><span><span id="m667">0               </span></span></p><p class="mem"><span class="loc"> 668: </span><span><span id="m668">0               </span></span></p><p class="mem"><span class="loc"> 669: </span><span><span id="m669">0               </span></span></p><p class="mem"><span class="loc"> 670: </span><span><span id="m670">0               </span></span></p><p class="mem"><span class="loc"> 671: </span><span><span id="m671">0               </span></span></p><p class="mem"><span class="loc"> 672: </span><span><span id="m672">0               </span></span></p><p class="mem"><span class="loc"> 673: </span><span><span id="m673">0               </span></span></p><p class="mem"><span class="loc"> 674: </span><span><span id="m674">0               </span></span></p><p class="mem"><span class="loc"> 675: </span><span><span id="m675">0               </span></span></p><p class="mem"><span class="loc"> 676: </span><span><span id="m676">0               </span></span></p><p class="mem"><span class="loc"> 677: </span><span><span id="m677">0               </span></span></p><p class="mem"><span class="loc"> 678: </span><span><span id="m678">0               </span></span></p><p class="mem"><span class="loc"> 679: </span><span><span id="m679">0               </span></span></p><p class="mem"><span class="loc"> 680: </span><span><span id="m680">0               </span></span></p><p class="mem"><span class="loc"> 681: </span><span><span id="m681">0               </span></span></p><p class="mem"><span class="loc"> 682: </span><span><span id="m682">0               </span></span></p><p class="mem"><span class="loc"> 683: </span><span><span id="m683">0               </span></span></p><p class="mem"><span class="loc"> 684: </span><span><span id="m684">0               </span></span></p><p class="mem"><span class="loc"> 685: </span><span><span id="m685">0               </span></span></p><p class="mem"><span class="loc"> 686: </span><span><span id="m686">0               </span></span></p><p class="mem"><span class="loc"> 687: </span><span><span id="m687">0               </span></span></p><p class="mem"><span class="loc"> 688: </span><span><span id="m688">0               </span></span></p><p class="mem"><span class="loc"> 689: </span><span><span id="m689">0               </span></span></p><p class="mem"><span class="loc"> 690: </span><span><span id="m690">0               </span></span></p><p class="mem"><span class="loc"> 691: </span><span><span id="m691">0               </span></span></p><p class="mem"><span class="loc"> 692: </span><span><span id="m692">0               </span></span></p><p class="mem"><span class="loc"> 693: </span><span><span id="m693">0               </span></span></p><p class="mem"><span class="loc"> 694: </span><span><span id="m694">0               </span></span></p><p class="mem"><span class="loc"> 695: </span><span><span id="m695">0               </span></span></p><p class="mem"><span class="loc"> 696: </span><span><span id="m696">0               </span></span></p><p class="mem"><span class="loc"> 697: </span><span><span id="m697">0               </span></span></p><p class="mem"><span class="loc"> 698: </span><span><span id="m698">0               </span></span></p><p class="mem"><span class="loc"> 699: </span><span><span id="m699">0               </span></span></p><p class="mem"><span class="loc"> 700: </span><span><span id="m700">0               </span></span></p><p class="mem"><span class="loc"> 701: </span><span><span id="m701">0               </span></span></p><p class="mem"><span class="loc"> 702: </span><span><span id="m702">0               </span></span></p><p class="mem"><span class="loc"> 703: </span><span><span id="m703">0               </span></span></p><p class="mem"><span class="loc"> 704: </span><span><span id="m704">0               </span></span></p><p class="mem"><span class="loc"> 705: </span><span><span id="m705">0               </span></span></p><p class="mem"><span class="loc"> 706: </span><span><span id="m706">0               </span></span></p><p class="mem"><span class="loc"> 707: </span><span><span id="m707">0               </span></span></p><p class="mem"><span class="loc"> 708: </span><span><span id="m708">0               </span></span></p><p class="mem"><span class="loc"> 709: </span><span><span id="m709">0               </span></span></p><p class="mem"><span class="loc"> 710: </span><span><span id="m710">0               </span></span></p><p class="mem"><span class="loc"> 711: </span><span><span id="m711">0               </span></span></p><p class="mem"><span class="loc"> 712: </span><span><span id="m712">0               </span></span></p><p class="mem"><span class="loc"> 713: </span><span><span id="m713">0               </span></span></p><p class="mem"><span class="loc"> 714: </span><span><span id="m714">0               </span></span></p><p class="mem"><span class="loc"> 715: </span><span><span id="m715">0               </span></span></p><p class="mem"><span class="loc"> 716: </span><span><span id="m716">0               </span></span></p><p class="mem"><span class="loc"> 717: </span><span><span id="m717">0               </span></span></p><p class="mem"><span class="loc"> 718: </span><span><span id="m718">0               </span></span></p><p class="mem"><span class="loc"> 719: </span><span><span id="m719">0               </span></span></p><p class="mem"><span class="loc"> 720: </span><span><span id="m720">0               </span></span></p><p class="mem"><span class="loc"> 721: </span><span><span id="m721">0               </span></span></p><p class="mem"><span class="loc"> 722: </span><span><span id="m722">0               </span></span></p><p class="mem"><span class="loc"> 723: </span><span><span id="m723">0               </span></span></p><p class="mem"><span class="loc"> 724: </span><span><span id="m724">0               </span></span></p><p class="mem"><span class="loc"> 725: </span><span><span id="m725">0               </span></span></p><p class="mem"><span class="loc"> 726: </span><span><span id="m726">0               </span></span></p><p class="mem"><span class="loc"> 727: </span><span><span id="m727">0               </span></span></p><p class="mem"><span class="loc"> 728: </span><span><span id="m728">0               </span></span></p><p class="mem"><span class="loc"> 729: </span><span><span id="m729">0               </span></span></p><p class="mem"><span class="loc"> 730: </span><span><span id="m730">0               </span></span></p><p class="mem"><span class="loc"> 731: </span><span><span id="m731">0               </span></span></p><p class="mem"><span class="loc"> 732: </span><span><span id="m732">0               </span></span></p><p class="mem"><span class="loc"> 733: </span><span><span id="m733">0               </span></span></p><p class="mem"><span class="loc"> 734: </span><span><span id="m734">0               </span></span></p><p class="mem"><span class="loc"> 735: </span><span><span id="m735">0               </span></span></p><p class="mem"><span class="loc"> 736: </span><span><span id="m736">0               </span></span></p><p class="mem"><span class="loc"> 737: </span><span><span id="m737">0               </span></span></p><p class="mem"><span class="loc"> 738: </span><span><span id="m738">0               </span></span></p><p class="mem"><span class="loc"> 739: </span><span><span id="m739">0               </span></span></p><p class="mem"><span class="loc"> 740: </span><span><span id="m740">0               </span></span></p><p class="mem"><span class="loc"> 741: </span><span><span id="m741">0               </span></span></p><p class="mem"><span class="loc"> 742: </span><span><span id="m742">0               </span></span></p><p class="mem"><span class="loc"> 743: </span><span><span id="m743">0               </span></span></p><p class="mem"><span class="loc"> 744: </span><span><span id="m744">0               </span></span></p><p class="mem"><span class="loc"> 745: </span><span><span id="m745">0               </span></span></p><p class="mem"><span class="loc"> 746: </span><span><span id="m746">0               </span></span></p><p class="mem"><span class="loc"> 747: </span><span><span id="m747">0               </span></span></p><p class="mem"><span class="loc"> 748: </span><span><span id="m748">0               </span></span></p><p class="mem"><span class="loc"> 749: </span><span><span id="m749">0               </span></span></p><p class="mem"><span class="loc"> 750: </span><span><span id="m750">0               </span></span></p><p class="mem"><span class="loc"> 751: </span><span><span id="m751">0               </span></span></p><p class="mem"><span class="loc"> 752: </span><span><span id="m752">0               </span></span></p><p class="mem"><span class="loc"> 753: </span><span><span id="m753">0               </span></span></p><p class="mem"><span class="loc"> 754: </span><span><span id="m754">0               </span></span></p><p class="mem"><span class="loc"> 755: </span><span><span id="m755">0               </span></span></p><p class="mem"><span class="loc"> 756: </span><span><span id="m756">0               </span></span></p><p class="mem"><span class="loc"> 757: </span><span><span id="m757">0               </span></span></p><p class="mem"><span class="loc"> 758: </span><span><span id="m758">0               </span></span></p><p class="mem"><span class="loc"> 759: </span><span><span id="m759">0               </span></span></p><p class="mem"><span class="loc"> 760: </span><span><span id="m760">0               </span></span></p><p class="mem"><span class="loc"> 761: </span><span><span id="m761">0               </span></span></p><p class="mem"><span class="loc"> 762: </span><span><span id="m762">0               </span></span></p><p class="mem"><span class="loc"> 763: </span><span><span id="m763">0               </span></span></p><p class="mem"><span class="loc"> 764: </span><span><span id="m764">0               </span></span></p><p class="mem"><span class="loc"> 765: </span><span><span id="m765">0               </span></span></p><p class="mem"><span class="loc"> 766: </span><span><span id="m766">0               </span></span></p><p class="mem"><span class="loc"> 767: </span><span><span id="m767">0               </span></span></p><p class="mem"><span class="loc"> 768: </span><span><span id="m768">0               </span></span></p><p class="mem"><span class="loc"> 769: </span><span><span id="m769">0               </span></span></p><p class="mem"><span class="loc"> 770: </span><span><span id="m770">0               </span></span></p><p class="mem"><span class="loc"> 771: </span><span><span id="m771">0               </span></span></p><p class="mem"><span class="loc"> 772: </span><span><span id="m772">0               </span></span></p><p class="mem"><span class="loc"> 773: </span><span><span id="m773">0               </span></span></p><p class="mem"><span class="loc"> 774: </span><span><span id="m774">0               </span></span></p><p class="mem"><span class="loc"> 775: </span><span><span id="m775">0               </span></span></p><p class="mem"><span class="loc"> 776: </span><span><span id="m776">0               </span></span></p><p class="mem"><span class="loc"> 777: </span><span><span id="m777">0               </span></span></p><p class="mem"><span class="loc"> 778: </span><span><span id="m778">0               </span></span></p><p class="mem"><span class="loc"> 779: </span><span><span id="m779">0               </span></span></p><p class="mem"><span class="loc"> 780: </span><span><span id="m780">0               </span></span></p><p class="mem"><span class="loc"> 781: </span><span><span id="m781">0               </span></span></p><p class="mem"><span class="loc"> 782: </span><span><span id="m782">0               </span></span></p><p class="mem"><span class="loc"> 783: </span><span><span id="m783">0               </span></span></p><p class="mem"><span class="loc"> 784: </span><span><span id="m784">0               </span></span></p><p class="mem"><span class="loc"> 785: </span><span><span id="m785">0               </span></span></p><p class="mem"><span class="loc"> 786: </span><span><span id="m786">0               </span></span></p><p class="mem"><span class="loc"> 787: </span><span><span id="m787">0               </span></span></p><p class="mem"><span class="loc"> 788: </span><span><span id="m788">0               </span></span></p><p class="mem"><span class="loc"> 789: </span><span><span id="m789">0               </span></span></p><p class="mem"><span class="loc"> 790: </span><span><span id="m790">0               </span></span></p><p class="mem"><span class="loc"> 791: </span><span><span id="m791">0               </span></span></p><p class="mem"><span class="loc"> 792: </span><span><span id="m792">0               </span></span></p><p class="mem"><span class="loc"> 793: </span><span><span id="m793">0               </span></span></p><p class="mem"><span class="loc"> 794: </span><span><span id="m794">0               </span></span></p><p class="mem"><span class="loc"> 795: </span><span><span id="m795">0               </span></span></p><p class="mem"><span class="loc"> 796: </span><span><span id="m796">0               </span></span></p><p class="mem"><span class="loc"> 797: </span><span><span id="m797">0               </span></span></p><p class="mem"><span class="loc"> 798: </span><span><span id="m798">0               </span></span></p><p class="mem"><span class="loc"> 799: </span><span><span id="m799">0               </span></span></p><p class="mem"><span class="loc"> 800: </span><span><span id="m800">0               </span></span></p><p class="mem"><span class="loc"> 801: </span><span><span id="m801">0               </span></span></p><p class="mem"><span class="loc"> 802: </span><span><span id="m802">0               </span></span></p><p class="mem"><span class="loc"> 803: </span><span><span id="m803">0               </span></span></p><p class="mem"><span class="loc"> 804: </span><span><span id="m804">0               </span></span></p><p class="mem"><span class="loc"> 805: </span><span><span id="m805">0               </span></span></p><p class="mem"><span class="loc"> 806: </span><span><span id="m806">0               </span></span></p><p class="mem"><span class="loc"> 807: </span><span><span id="m807">0               </span></span></p><p class="mem"><span class="loc"> 808: </span><span><span id="m808">0               </span></span></p><p class="mem"><span class="loc"> 809: </span><span><span id="m809">0               </span></span></p><p class="mem"><span class="loc"> 810: </span><span><span id="m810">0               </span></span></p><p class="mem"><span class="loc"> 811: </span><span><span id="m811">0               </span></span></p><p class="mem"><span class="loc"> 812: </span><span><span id="m812">0               </span></span></p><p class="mem"><span class="loc"> 813: </span><span><span id="m813">0               </span></span></p><p class="mem"><span class="loc"> 814: </span><span><span id="m814">0               </span></span></p><p class="mem"><span class="loc"> 815: </span><span><span id="m815">0               </span></span></p><p class="mem"><span class="loc"> 816: </span><span><span id="m816">0               </span></span></p><p class="mem"><span class="loc"> 817: </span><span><span id="m817">0               </span></span></p><p class="mem"><span class="loc"> 818: </span><span><span id="m818">0               </span></span></p><p class="mem"><span class="loc"> 819: </span><span><span id="m819">0               </span></span></p><p class="mem"><span class="loc"> 820: </span><span><span id="m820">0               </span></span></p><p class="mem"><span class="loc"> 821: </span><span><span id="m821">0               </span></span></p><p class="mem"><span class="loc"> 822: </span><span><span id="m822">0               </span></span></p><p class="mem"><span class="loc"> 823: </span><span><span id="m823">0               </span></span></p><p class="mem"><span class="loc"> 824: </span><span><span id="m824">0               </span></span></p><p class="mem"><span class="loc"> 825: </span><span><span id="m825">0               </span></span></p><p class="mem"><span class="loc"> 826: </span><span><span id="m826">0               </span></span></p><p class="mem"><span class="loc"> 827: </span><span><span id="m827">0               </span></span></p><p class="mem"><span class="loc"> 828: </span><span><span id="m828">0               </span></span></p><p class="mem"><span class="loc"> 829: </span><span><span id="m829">0               </span></span></p><p class="mem"><span class="loc"> 830: </span><span><span id="m830">0               </span></span></p><p class="mem"><span class="loc"> 831: </span><span><span id="m831">0               </span></span></p><p class="mem"><span class="loc"> 832: </span><span><span id="m832">0               </span></span></p><p class="mem"><span class="loc"> 833: </span><span><span id="m833">0               </span></span></p><p class="mem"><span class="loc"> 834: </span><span><span id="m834">0               </span></span></p><p class="mem"><span class="loc"> 835: </span><span><span id="m835">0               </span></span></p><p class="mem"><span class="loc"> 836: </span><span><span id="m836">0               </span></span></p><p class="mem"><span class="loc"> 837: </span><span><span id="m837">0               </span></span></p><p class="mem"><span class="loc"> 838: </span><span><span id="m838">0               </span></span></p><p class="mem"><span class="loc"> 839: </span><span><span id="m839">0               </span></span></p><p class="mem"><span class="loc"> 840: </span><span><span id="m840">0               </span></span></p><p class="mem"><span class="loc"> 841: </span><span><span id="m841">0               </span></span></p><p class="mem"><span class="loc"> 842: </span><span><span id="m842">0               </span></span></p><p class="mem"><span class="loc"> 843: </span><span><span id="m843">0               </span></span></p><p class="mem"><span class="loc"> 844: </span><span><span id="m844">0               </span></span></p><p class="mem"><span class="loc"> 845: </span><span><span id="m845">0               </span></span></p><p class="mem"><span class="loc"> 846: </span><span><span id="m846">0               </span></span></p><p class="mem"><span class="loc"> 847: </span><span><span id="m847">0               </span></span></p><p class="mem"><span class="loc"> 848: </span><span><span id="m848">0               </span></span></p><p class="mem"><span class="loc"> 849: </span><span><span id="m849">0               </span></span></p><p class="mem"><span class="loc"> 850: </span><span><span id="m850">0               </span></span></p><p class="mem"><span class="loc"> 851: </span><span><span id="m851">0               </span></span></p><p class="mem"><span class="loc"> 852: </span><span><span id="m852">0               </span></span></p><p class="mem"><span class="loc"> 853: </span><span><span id="m853">0               </span></span></p><p class="mem"><span class="loc"> 854: </span><span><span id="m854">0               </span></span></p><p class="mem"><span class="loc"> 855: </span><span><span id="m855">0               </span></span></p><p class="mem"><span class="loc"> 856: </span><span><span id="m856">0               </span></span></p><p class="mem"><span class="loc"> 857: </span><span><span id="m857">0               </span></span></p><p class="mem"><span class="loc"> 858: </span><span><span id="m858">0               </span></span></p><p class="mem"><span class="loc"> 859: </span><span><span id="m859">0               </span></span></p><p class="mem"><span class="loc"> 860: </span><span><span id="m860">0               </span></span></p><p class="mem"><span class="loc"> 861: </span><span><span id="m861">0               </span></span></p><p class="mem"><span class="loc"> 862: </span><span><span id="m862">0               </span></span></p><p class="mem"><span class="loc"> 863: </span><span><span id="m863">0               </span></span></p><p class="mem"><span class="loc"> 864: </span><span><span id="m864">0               </span></span></p><p class="mem"><span class="loc"> 865: </span><span><span id="m865">0               </span></span></p><p class="mem"><span class="loc"> 866: </span><span><span id="m866">0               </span></span></p><p class="mem"><span class="loc"> 867: </span><span><span id="m867">0               </span></span></p><p class="mem"><span class="loc"> 868: </span><span><span id="m868">0               </span></span></p><p class="mem"><span class="loc"> 869: </span><span><span id="m869">0               </span></span></p><p class="mem"><span class="loc"> 870: </span><span><span id="m870">0               </span></span></p><p class="mem"><span class="loc"> 871: </span><span><span id="m871">0               </span></span></p><p class="mem"><span class="loc"> 872: </span><span><span id="m872">0               </span></span></p><p class="mem"><span class="loc"> 873: </span><span><span id="m873">0               </span></span></p><p class="mem"><span class="loc"> 874: </span><span><span id="m874">0               </span></span></p><p class="mem"><span class="loc"> 875: </span><span><span id="m875">0               </span></span></p><p class="mem"><span class="loc"> 876: </span><span><span id="m876">0               </span></span></p><p class="mem"><span class="loc"> 877: </span><span><span id="m877">0               </span></span></p><p class="mem"><span class="loc"> 878: </span><span><span id="m878">0               </span></span></p><p class="mem"><span class="loc"> 879: </span><span><span id="m879">0               </span></span></p><p class="mem"><span class="loc"> 880: </span><span><span id="m880">0               </span></span></p><p class="mem"><span class="loc"> 881: </span><span><span id="m881">0               </span></span></p><p class="mem"><span class="loc"> 882: </span><span><span id="m882">0               </span></span></p><p class="mem"><span class="loc"> 883: </span><span><span id="m883">0               </span></span></p><p class="mem"><span class="loc"> 884: </span><span><span id="m884">0               </span></span></p><p class="mem"><span class="loc"> 885: </span><span><span id="m885">0               </span></span></p><p class="mem"><span class="loc"> 886: </span><span><span id="m886">0               </span></span></p><p class="mem"><span class="loc"> 887: </span><span><span id="m887">0               </span></span></p><p class="mem"><span class="loc"> 888: </span><span><span id="m888">0               </span></span></p><p class="mem"><span class="loc"> 889: </span><span><span id="m889">0               </span></span></p><p class="mem"><span class="loc"> 890: </span><span><span id="m890">0               </span></span></p><p class="mem"><span class="loc"> 891: </span><span><span id="m891">0               </span></span></p><p class="mem"><span class="loc"> 892: </span><span><span id="m892">0               </span></span></p><p class="mem"><span class="loc"> 893: </span><span><span id="m893">0               </span></span></p><p class="mem"><span class="loc"> 894: </span><span><span id="m894">0               </span></span></p><p class="mem"><span class="loc"> 895: </span><span><span id="m895">0               </span></span></p><p class="mem"><span class="loc"> 896: </span><span><span id="m896">0               </span></span></p><p class="mem"><span class="loc"> 897: </span><span><span id="m897">0               </span></span></p><p class="mem"><span class="loc"> 898: </span><span><span id="m898">0               </span></span></p><p class="mem"><span class="loc"> 899: </span><span><span id="m899">0               </span></span></p><p class="mem"><span class="loc"> 900: </span><span><span id="m900">0               </span></span></p><p class="mem"><span class="loc"> 901: </span><span><span id="m901">0               </span></span></p><p class="mem"><span class="loc"> 902: </span><span><span id="m902">0               </span></span></p><p class="mem"><span class="loc"> 903: </span><span><span id="m903">0               </span></span></p><p class="mem"><span class="loc"> 904: </span><span><span id="m904">0               </span></span></p><p class="mem"><span class="loc"> 905: </span><span><span id="m905">0               </span></span></p><p class="mem"><span class="loc"> 906: </span><span><span id="m906">0               </span></span></p><p class="mem"><span class="loc"> 907: </span><span><span id="m907">0               </span></span></p><p class="mem"><span class="loc"> 908: </span><span><span id="m908">0               </span></span></p><p class="mem"><span class="loc"> 909: </span><span><span id="m909">0               </span></span></p><p class="mem"><span class="loc"> 910: </span><span><span id="m910">0               </span></span></p><p class="mem"><span class="loc"> 911: </span><span><span id="m911">0               </span></span></p><p class="mem"><span class="loc"> 912: </span><span><span id="m912">0               </span></span></p><p class="mem"><span class="loc"> 913: </span><span><span id="m913">0               </span></span></p><p class="mem"><span class="loc"> 914: </span><span><span id="m914">0               </span></span></p><p class="mem"><span class="loc"> 915: </span><span><span id="m915">0               </span></span></p><p class="mem"><span class="loc"> 916: </span><span><span id="m916">0               </span></span></p><p class="mem"><span class="loc"> 917: </span><span><span id="m917">0               </span></span></p><p class="mem"><span class="loc"> 918: </span><span><span id="m918">0               </span></span></p><p class="mem"><span class="loc"> 919: </span><span><span id="m919">0               </span></span></p><p class="mem"><span class="loc"> 920: </span><span><span id="m920">0               </span></span></p><p class="mem"><span class="loc"> 921: </span><span><span id="m921">0               </span></span></p><p class="mem"><span class="loc"> 922: </span><span><span id="m922">0               </span></span></p><p class="mem"><span class="loc"> 923: </span><span><span id="m923">0               </span></span></p><p class="mem"><span class="loc"> 924: </span><span><span id="m924">0               </span></span></p><p class="mem"><span class="loc"> 925: </span><span><span id="m925">0               </span></span></p><p class="mem"><span class="loc"> 926: </span><span><span id="m926">0               </span></span></p><p class="mem"><span class="loc"> 927: </span><span><span id="m927">0               </span></span></p><p class="mem"><span class="loc"> 928: </span><span><span id="m928">0               </span></span></p><p class="mem"><span class="loc"> 929: </span><span><span id="m929">0               </span></span></p><p class="mem"><span class="loc"> 930: </span><span><span id="m930">0               </span></span></p><p class="mem"><span class="loc"> 931: </span><span><span id="m931">0               </span></span></p><p class="mem"><span class="loc"> 932: </span><span><span id="m932">0               </span></span></p><p class="mem"><span class="loc"> 933: </span><span><span id="m933">0               </span></span></p><p class="mem"><span class="loc"> 934: </span><span><span id="m934">0               </span></span></p><p class="mem"><span class="loc"> 935: </span><span><span id="m935">0               </span></span></p><p class="mem"><span class="loc"> 936: </span><span><span id="m936">0               </span></span></p><p class="mem"><span class="loc"> 937: </span><span><span id="m937">0               </span></span></p><p class="mem"><span class="loc"> 938: </span><span><span id="m938">0               </span></span></p><p class="mem"><span class="loc"> 939: </span><span><span id="m939">0               </span></span></p><p class="mem"><span class="loc"> 940: </span><span><span id="m940">0               </span></span></p><p class="mem"><span class="loc"> 941: </span><span><span id="m941">0               </span></span></p><p class="mem"><span class="loc"> 942: </span><span><span id="m942">0               </span></span></p><p class="mem"><span class="loc"> 943: </span><span><span id="m943">0               </span></span></p><p class="mem"><span class="loc"> 944: </span><span><span id="m944">0               </span></span></p><p class="mem"><span class="loc"> 945: </span><span><span id="m945">0               </span></span></p><p class="mem"><span class="loc"> 946: </span><span><span id="m946">0               </span></span></p><p class="mem"><span class="loc"> 947: </span><span><span id="m947">0               </span></span></p><p class="mem"><span class="loc"> 948: </span><span><span id="m948">0               </span></span></p><p class="mem"><span class="loc"> 949: </span><span><span id="m949">0               </span></span></p><p class="mem"><span class="loc"> 950: </span><span><span id="m950">0               </span></span></p><p class="mem"><span class="loc"> 951: </span><span><span id="m951">0               </span></span></p><p class="mem"><span class="loc"> 952: </span><span><span id="m952">0               </span></span></p><p class="mem"><span class="loc"> 953: </span><span><span id="m953">0               </span></span></p><p class="mem"><span class="loc"> 954: </span><span><span id="m954">0               </span></span></p><p class="mem"><span class="loc"> 955: </span><span><span id="m955">0               </span></span></p><p class="mem"><span class="loc"> 956: </span><span><span id="m956">0               </span></span></p><p class="mem"><span class="loc"> 957: </span><span><span id="m957">0               </span></span></p><p class="mem"><span class="loc"> 958: </span><span><span id="m958">0               </span></span></p><p class="mem"><span class="loc"> 959: </span><span><span id="m959">0               </span></span></p><p class="mem"><span class="loc"> 960: </span><span><span id="m960">0               </span></span></p><p class="mem"><span class="loc"> 961: </span><span><span id="m961">0               </span></span></p><p class="mem"><span class="loc"> 962: </span><span><span id="m962">0               </span></span></p><p class="mem"><span class="loc"> 963: </span><span><span id="m963">0               </span></span></p><p class="mem"><span class="loc"> 964: </span><span><span id="m964">0               </span></span></p><p class="mem"><span class="loc"> 965: </span><span><span id="m965">0               </span></span></p><p class="mem"><span class="loc"> 966: </span><span><span id="m966">0               </span></span></p><p class="mem"><span class="loc"> 967: </span><span><span id="m967">0               </span></span></p><p class="mem"><span class="loc"> 968: </span><span><span id="m968">0               </span></span></p><p class="mem"><span class="loc"> 969: </span><span><span id="m969">0               </span></span></p><p class="mem"><span class="loc"> 970: </span><span><span id="m970">0               </span></span></p><p class="mem"><span class="loc"> 971: </span><span><span id="m971">0               </span></span></p><p class="mem"><span class="loc"> 972: </span><span><span id="m972">0               </span></span></p><p class="mem"><span class="loc"> 973: </span><span><span id="m973">0               </span></span></p><p class="mem"><span class="loc"> 974: </span><span><span id="m974">0               </span></span></p><p class="mem"><span class="loc"> 975: </span><span><span id="m975">0               </span></span></p><p class="mem"><span class="loc"> 976: </span><span><span id="m976">0               </span></span></p><p class="mem"><span class="loc"> 977: </span><span><span id="m977">0               </span></span></p><p class="mem"><span class="loc"> 978: </span><span><span id="m978">0               </span></span></p><p class="mem"><span class="loc"> 979: </span><span><span id="m979">0               </span></span></p><p class="mem"><span class="loc"> 980: </span><span><span id="m980">0               </span></span></p><p class="mem"><span class="loc"> 981: </span><span><span id="m981">0               </span></span></p><p class="mem"><span class="loc"> 982: </span><span><span id="m982">0               </span></span></p><p class="mem"><span class="loc"> 983: </span><span><span id="m983">0               </span></span></p><p class="mem"><span class="loc"> 984: </span><span><span id="m984">0               </span></span></p><p class="mem"><span class="loc"> 985: </span><span><span id="m985">0               </span></span></p><p class="mem"><span class="loc"> 986: </span><span><span id="m986">0               </span></span></p><p class="mem"><span class="loc"> 987: </span><span><span id="m987">0               </span></span></p><p class="mem"><span class="loc"> 988: </span><span><span id="m988">0               </span></span></p><p class="mem"><span class="loc"> 989: </span><span><span id="m989">0               </span></span></p><p class="mem"><span class="loc"> 990: </span><span><span id="m990">0               </span></span></p><p class="mem"><span class="loc"> 991: </span><span><span id="m991">0               </span></span></p><p class="mem"><span class="loc"> 992: </span><span><span id="m992">0               </span></span></p><p class="mem"><span class="loc"> 993: </span><span><span id="m993">0               </span></span></p><p class="mem"><span class="loc"> 994: </span><span><span id="m994">0               </span></span></p><p class="mem"><span class="loc"> 995: </span><span><span id="m995">0               </span></span></p><p class="mem"><span class="loc"> 996: </span><span><span id="m996">0               </span></span></p><p class="mem"><span class="loc"> 997: </span><span><span id="m997">0               </span></span></p><p class="mem"><span class="loc"> 998: </span><span><span id="m998">0               </span></span></p><p class="mem"><span class="loc"> 999: </span><span><span id="m999">0               </span></span></p><p class="mem"><span class="loc">1000: </span><span><span id="m1000">0               </span></span></p><p class="mem"><span class="loc">1001: </span><span><span id="m1001">0               </span></span></p><p class="mem"><span class="loc">1002: </span><span><span id="m1002">0               </span></span></p><p class="mem"><span class="loc">1003: </span><span><span id="m1003">0               </span></span></p><p class="mem"><span class="loc">1004: </span><span><span id="m1004">0               </span></span></p><p class="mem"><span class="loc">1005: </span><span><span id="m1005">0               </span></span></p><p class="mem"><span class="loc">1006: </span><span><span id="m1006">0               </span></span></p><p class="mem"><span class="loc">1007: </span><span><span id="m1007">0               </span></span></p><p class="mem"><span class="loc">1008: </span><span><span id="m1008">0               </span></span></p><p class="mem"><span class="loc">1009: </span><span><span id="m1009">0               </span></span></p><p class="mem"><span class="loc">1010: </span><span><span id="m1010">0               </span></span></p><p class="mem"><span class="loc">1011: </span><span><span id="m1011">0               </span></span></p><p class="mem"><span class="loc">1012: </span><span><span id="m1012">0               </span></span></p><p class="mem"><span class="loc">1013: </span><span><span id="m1013">0               </span></span></p><p class="mem"><span class="loc">1014: </span><span><span id="m1014">0               </span></span></p><p class="mem"><span class="loc">1015: </span><span><span id="m1015">0               </span></span></p><p class="mem"><span class="loc">1016: </span><span><span id="m1016">0               </span></span></p><p class="mem"><span class="loc">1017: </span><span><span id="m1017">0               </span></span></p><p class="mem"><span class="loc">1018: </span><span><span id="m1018">0               </span></span></p><p class="mem"><span class="loc">1019: </span><span><span id="m1019">0               </span></span></p><p class="mem"><span class="loc">1020: </span><span><span id="m1020">0               </span></span></p><p class="mem"><span class="loc">1021: </span><span><span id="m1021">0               </span></span></p><p class="mem"><span class="loc">1022: </span><span><span id="m1022">0               </span></span></p><p class="mem"><span class="loc">1023: </span><span><span id="m1023">0               </span></span></p></div>
+   </div>
+   <p><label title="When checked, memory will automatically be scrolled so that the currently selected location is visible.  (However, no autoscrolling is done when the program is run at &#39;fast&#39; or &#39;fastest&#39; speed.)"><input type="checkbox" id="autoscroll">Autoscroll</label></p>
+</td>
+<td rowspan="3" bgcolor="#555555">
+   <div id="graphicsholder">
+       <canvas id="graphics" width="128" height="512" title="A graphical display of the contents of memory.  Each bit in memory is represented by a dot which is white for zero or black for one.  Each row of dots shows the bits of four consecutive memory locations."></canvas>
+   </div>
+</td>
+</tr>
+   
+<tr>
+<td>
+    <table border="0">
+    <tbody><tr>
+       <td colspan="2"><p class="heading">Registers</p></td>
+       <td colspan="2"><select id="regdisplay" title="Select how the contents of the registers are displayed.  The &#39;Default display&#39; option shows an assembly language instruction in the IR register and integers in the other registers.">
+          <option value="1">Default display</option>
+          <option value="2">Integer display</option>
+          <option value="3">Unsigned display</option>
+          <option value="4">Binary display</option>
+       </select></td>
+    </tr>
+    <tr>
+       <td align="right"><label class="label" id="X_label" for="X_input">X:</label></td>
+       <td><input type="text" id="X_input" size="16" readonly="true" title="The first input register for the Arithmetic Logic Unit." style="background-color: white;"></td>
+       <td align="right"><label class="label" id="COUNT_label" for="COUNT_input">COUNT:</label></td>
+       <td><input type="text" id="COUNT_input" size="16" readonly="true" title="Holds the current step number.  Each instruction is executed by a sequence of steps.  At the end of each instruction, the COUNT registers is reset to zero." style="background-color: white;"></td>
+    </tr>
+    <tr>
+       <td align="right"><label class="label" id="Y_label" for="Y_input">Y:</label></td>
+       <td><input type="text" id="Y_input" size="16" readonly="true" title="The second input register for the Arithmetic Logic Unit." style="background-color: white;"></td>
+       <td align="right"><label class="label" id="IR_label" for="IR_input">IR:</label></td>
+       <td><input type="text" id="IR_input" size="16" readonly="true" title="Instructions are copied from memory into this Instruction Register.  This is always done when COUNT is 3; the remaining steps in the instruction cycle will execute the instruction in this register." style="background-color: white;"></td>
+    </tr>
+    <tr>
+       <td align="right"><label class="label" id="FLAG_label" for="FLAG_input">FLAG:</label></td>
+       <td><input type="text" id="FLAG_input" size="16" readonly="true" title="The Arithmetic Logic Unit sets FLAG to zero or one when it does certain computations such as addition or shift." style="background-color: white;"></td>
+       <td align="right"><label class="label" id="PC_label" for="PC_input">PC:</label></td>
+       <td><input type="text" id="PC_input" size="16" readonly="true" title="This Program Counter register holds the memory address of the next program instruction to be executed.  It goes up by one in each execution cycle but can also be modified by jump instructions." style="background-color: white;"></td>
+    </tr>
+    <tr>
+       <td align="right"><label class="label" id="AC_label" for="AC_input">AC:</label></td>
+       <td><input type="text" id="AC_input" size="16" readonly="true" title="This Accumulator register holds the result of computations done by the Arithmetic Logic Unit.  It is also used for loading data from memory and storing answers into memeory." style="background-color: white;"></td>
+       <td align="right"><label class="label" id="ADDR_label" for="ADDR_input">ADDR:</label></td>
+       <td><input type="text" id="ADDR_input" size="16" readonly="true" title="This Address register holds the address of a memory location.  Data and instructions can only be loaded from and stored to the location that is currently selected by this register." style="background-color: white;"></td>
+    </tr>
+    </tbody></table>
+</td>
+</tr>
+
+<tr>
+<td>
+    <table border="0" id="wiretable" title="Program execution is driven by control wires that are turned on and off based on the contents of the COUNT and IR registers.  This panel lists all 26 control wires.  A wire name is highlighted when the wire is on (but not during fast execution).">
+    <tbody><tr>
+      <td colspan="2"><p class="heading">Control Wires</p></td>
+      <td valign="bottom"><p class="wire" id="w0" style="background-color: white;">Select-Add</p></td> 
+      <td valign="bottom"><p class="wire" id="w1" style="background-color: white;">Select-Subtract</p></td> 
+    </tr>
+    <tr>
+      <td><p class="wire" id="w2" style="background-color: white;">Select-AND</p></td>
+      <td><p class="wire" id="w3" style="background-color: white;">Select-OR</p></td> 
+      <td><p class="wire" id="w4" style="background-color: white;">Select-NOT</p></td>
+      <td><p class="wire" id="w5" style="background-color: white;">Select-Shift-Left</p></td> 
+    </tr>
+    <tr>
+      <td><p class="wire" id="w6" style="background-color: white;">Select-Shift-Right</p></td>
+      <td><p class="wire" id="w7" style="background-color: white;">Load-Data-Into-Mem</p></td> 
+      <td><p class="wire" id="w8" style="background-color: white;">Load-X-From-AC</p></td> 
+      <td><p class="wire" id="w9" style="background-color: white;">Load-Y-From-Mem</p></td> 
+    </tr>
+    <tr>
+      <td><p class="wire" id="w10" style="background-color: white;">Load-Y-From-IR</p></td>
+      <td><p class="wire" id="w11" style="background-color: white;">Load-AC-From-ALU</p></td> 
+      <td><p class="wire" id="w12" style="background-color: white;">Load-AC-From-Mem</p></td> 
+      <td><p class="wire" id="w13" style="background-color: white;">Load-AC-From-IR</p></td> 
+    </tr>
+    <tr>
+      <td><p class="wire" id="w14" style="background-color: white;">Increment-AC</p></td>
+      <td><p class="wire" id="w15" style="background-color: white;">Decrement-AC</p></td> 
+      <td><p class="wire" id="w16" style="background-color: white;">Load-Flag-From-ALU</p></td> 
+      <td><p class="wire" id="w17" style="background-color: white;">Load-PC-From-Mem</p></td> 
+    </tr>
+    <tr>
+      <td><p class="wire" id="w18" style="background-color: white;">Load-PC-From-IR</p></td>
+      <td><p class="wire" id="w19" style="background-color: white;">Increment-PC</p></td> 
+      <td><p class="wire" id="w20" style="background-color: white;">Load-IR-From-Mem</p></td> 
+      <td><p class="wire" id="w21" style="background-color: white;">Load-ADDR-From-IR</p></td> 
+    </tr>
+    <tr>
+      <td><p class="wire" id="w22" style="background-color: white;">Load-ADDR-From-Y</p></td>
+      <td><p class="wire" id="w23" style="background-color: white;">Load-ADDR-From-PC</p></td> 
+      <td><p class="wire" id="w24" style="background-color: white;">Set-COUNT-To-Zero</p></td> 
+      <td><p class="wire" id="w25" style="background-color: white;">Stop-Clock</p></td>
+    </tr>
+    </tbody></table>
+</td>
+</tr>
+
+</tbody></table>
+<p style="margin-left:500px"><button id="showmemhex" title="Get contents of memory as a list of hexadecimal numbers, which can be loaded in to the Logisim simulation of xComputer.  (This has only a very limited audience.)">Grab Memory for Logisim</button></p>
+</div>
+
+<div id="memexportbg">
+</div>
+<div id="memexport">
+<p><button id="hidememhex">Dismiss!</button></p>
+<p>
+The textarea below shows the contents of the<br>
+xComputer memory, in a format that can be <br>
+loaded into the RAM component of the Logisim<br>
+simulation of xComputer.  This feature has<br>
+a very limited audience.  For information, see <br>
+the <a href="https://math.hws.edu/eck/js/xComputer/info.html#logisim">last section</a> of the xComputer info page.
+</p>
+<p style="text-align:center"><textarea rows="20" cols="20" id="memhex" readonly=""></textarea>
+</p></div>
+
+
+
+
+</body></html>
