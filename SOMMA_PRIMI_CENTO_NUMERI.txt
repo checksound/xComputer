@@ -1,0 +1,13 @@
+LOD-C 100
+STO   13
+LOD-C 0
+STO   14
+LOD   14
+ADD   13
+STO   14
+LOD   13
+DEC
+JMZ   12
+STO   13
+JMP   4
+HLT

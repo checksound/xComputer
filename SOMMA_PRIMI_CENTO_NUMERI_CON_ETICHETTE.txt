@@ -1,0 +1,16 @@
+           LOD-C 100
+STO Num
+      LOD-C 100
+      STO Ans
+Loop: LOD Ans
+      ADD Num
+      STO Ans
+      LOD Num
+      DEC
+      JMZ Done
+      STO Num
+      JMP Loop
+Done: HLT
+Num:  data
+Ans:  data
+
