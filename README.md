@@ -36,7 +36,10 @@ con le etichette [Versione con etichette](./SOMMA_PRIMI_CENTO_NUMERI_CON_ETICHET
 
 Ora prova a scrivere un programma che dato una lista di numeri memorizzati da una certa cella di memoria e terminanti con la cella con valore 0 per indicare la fine della lista, li metta in ordine inverso di inserimento. Quindi se per esempio la lista1 ha i numeri 8 9 3 21 17 6 2 91 0 allora la lista ottenuta chiamiamola lista2 deve essere 91 2 6 17 21 3 9 8 0 (sempre lo 0 per indicare l'ultimo elemento). Riesci a produrre un programma per xComputer?
 
-[Soluzione di Gemini](https://gemini.google.com/share/dba16be891bc):
+[Soluzione di Gemini](https://gemini.google.com/share/dba16be891bc)
+
+La soluzione proposta da Gemini ha avuto bisogno di alcune correzioni per far funzionare correttamente 
+il programma.
 
 ```
 
@@ -44,7 +47,7 @@ Ora prova a scrivere un programma che dato una lista di numeri memorizzati da un
 ; FASE 1: Trova la Fine della LISTA1 (Punta a dove va lo 0)
 ; **********************************************************
 
-    lod LISTA1   ; Carica l'indirizzo di inizio lista 
+    lod-c LISTA1 ; Carica l'indirizzo di inizio lista 
     sto P_ORIG_R ; P_ORIG_R (Puntatore Originale, R come Read/Lettura)
     
 trova_fine:
@@ -71,7 +74,7 @@ prepara_copia:
     
     ; 2. P_NUOVA_R (Puntatore Nuova Lista, R come Read/Lettura)
     ; Inizializza il puntatore della lista di destinazione
-    lod START_LISTA2
+    lod-c START_LISTA2
     sto P_NUOVA_R
     
 ; **********************************************************
@@ -81,9 +84,12 @@ copia_inversa:
 
     ; 1. Verifica se abbiamo superato l'inizio della LISTA1
     ; L'indirizzo di P_ORIG_W è minore dell'indirizzo di LISTA1?
-    lod LISTA1
+    lod-c LISTA1
     sub P_ORIG_W ; AC = LISTA1 - P_ORIG_W
     jmn copia_elemento ; Se il risultato è negativo (P_ORIG_W > LISTA1), copia l'elemento
+    
+    jmz copia_elemento ; Se il risultato è zezo (P_ORIG_W == LISTA1), copia l'elemento
+    
     ; Altrimenti, P_ORIG_W ha raggiunto o superato l'inizio della lista.
     jmp fine_ciclo ; Termina il ciclo
 
@@ -124,7 +130,7 @@ P_ORIG_R: data ; Indirizzo: Puntatore alla LISTA1 (usato per trovare lo 0)
 P_ORIG_W: data ; Indirizzo: Puntatore alla LISTA1 (usato per leggere all'indietro)
 P_NUOVA_R: data ; Indirizzo: Puntatore alla LISTA2 (usato per scrivere)
 
-@30 ; Inizio della lista originale
+; Inizio della lista originale
 LISTA1: 8
         9
         3
@@ -135,9 +141,11 @@ LISTA1: 8
         91
         0 ; Sentinella (fine lista)
 
-@50 ; Inizio della lista di destinazione
+; Inizio della lista di destinazione
 START_LISTA2: data ; Qui verrà scritta la lista invertita
 
 ```
 
+Il programma corretto [CREA_LISTA_INVERSA](./CREA_LISTA_INVERSA.txt) e versione Gemini 
+[CREA_LISTA_INVERSA_VERSIONE_GEMINI](./CREA_LISTA_INVERSA_GEMINI.txt).
 
