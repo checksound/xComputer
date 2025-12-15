@@ -147,5 +147,5 @@ START_LISTA2: data ; Qui verrà scritta la lista invertita
 ```
 
 Il programma corretto [CREA_LISTA_INVERSA](./CREA_LISTA_INVERSA.txt) e versione Gemini 
-[CREA_LISTA_INVERSA_VERSIONE_GEMINI](./CREA_LISTA_INVERSA_GEMINI.txt).
+[CREA_LISTA_INVERSA_VERSIONE_GEMINI](./CREA_LISTA_INVERSA_GEMINI.txt) (ERRATA!).
 
