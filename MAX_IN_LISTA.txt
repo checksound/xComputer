@@ -1,0 +1,63 @@
+; **********************************************************
+; FASE 1: Inizializzazione
+; **********************************************************
+
+    lod-c LISTA
+    sto P_CURR    ; Inizializza il puntatore corrente
+
+    ; Gestione primo elemento:
+    ; Carichiamo il primo numero e lo consideriamo provvisoriamente il MAX
+    lod-i P_CURR
+    jmz fine      ; Se la lista inizia subito con 0, è vuota. Fine.
+    sto MAX       ; Il primo numero è il MAX attuale
+
+; **********************************************************
+; FASE 2: Ciclo di Scansione
+; **********************************************************
+
+ciclo:
+    ; 1. Avanza il puntatore al prossimo numero
+    lod P_CURR
+    inc
+    sto P_CURR
+
+    ; 2. Carica il numero
+    lod-i P_CURR
+    jmz fine      ; Se è 0 (sentinella), abbiamo finito.
+
+    ; 3. Confronto: (Numero Corrente) - (MAX Attuale)
+    ; Nota: lod-i P_CURR ha già messo il numero nell'AC
+    sub MAX
+    
+    ; Analisi del risultato della sottrazione:
+    ; Se Risultato < 0 (cioè Curr < Max), allora il nuovo numero NON è maggiore.
+    jmn ciclo     ; Salta e torna all'inizio, non aggiornare MAX.
+    
+    ; Se siamo qui, significa che (Curr - Max) >= 0, quindi
+    ; abbiamo trovato un nuovo massimo (o un valore uguale).
+    
+    ; 4. Aggiorna MAX
+    lod-i P_CURR  ; Ricarica il valore (perché in AC c'era la differenza)
+    sto MAX       ; Salvalo come nuovo MAX
+    
+    jmp ciclo     ; Torna a controllare il prossimo
+
+; **********************************************************
+; FASE 3: Fine
+; **********************************************************
+
+fine:
+    hlt           ; Il valore massimo è ora nella cella 'MAX'
+
+; --- Variabili ---
+P_CURR: data      ; Puntatore che scorre la lista
+MAX:    data      ; Qui verrà memorizzato il valore più alto trovato
+
+; --- Dati ---
+LISTA: 12 
+        5
+       78 
+        3 
+       99 
+       15 
+        0 ; Lista di esempio (MAX dovrebbe essere 99)

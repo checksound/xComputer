@@ -1,0 +1,80 @@
+; **********************************************************
+; FASE 1: Trova l'ultimo elemento (P_RIGHT)
+; **********************************************************
+    lod-c LISTA1   ; Carica l'indirizzo iniziale
+    sto P_RIGHT    ; P_RIGHT scorrerà fino allo 0
+    
+trova_fine:
+    lod-i P_RIGHT  ; Carica il valore puntato
+    jmz imposta_p_left ; Se è 0, abbiamo trovato la fine
+    
+    lod P_RIGHT    ; Incrementa indirizzo
+    inc
+    sto P_RIGHT
+    jmp trova_fine
+
+imposta_p_left:
+    lod P_RIGHT    ; P_RIGHT attualmente punta allo 0
+    dec
+    sto P_RIGHT    ; Ora P_RIGHT punta all'ultimo numero (es. 91)
+
+; **********************************************************
+; FASE 2: Inizializza Puntatore Iniziale (P_LEFT)
+; **********************************************************
+    lod-c LISTA1   ; P_LEFT parte dall'inizio
+    sto P_LEFT
+
+; **********************************************************
+; FASE 3: Ciclo di Scambio (Swap)
+; **********************************************************
+ciclo_swap:
+    ; Condizione di uscita: P_RIGHT - P_LEFT
+    ; Dobbiamo fermarci quando i puntatori si incontrano (zero) 
+    ; o si superano (negativo).
+    
+    lod P_RIGHT
+    sub P_LEFT
+    
+    jmn fine       ; Se negativo (P_LEFT > P_RIGHT), abbiamo finito
+    jmz fine       ; Se zero (P_LEFT == P_RIGHT), l'elemento centrale 
+                   ; non serve scambiarlo.
+    
+    ; --- Inizio dello Scambio (Swap) ---
+    lod-i P_LEFT   ; Carica valore in P_LEFT (es. 8)
+    sto TEMP       ; Salvalo in una cella temporanea
+    
+    lod-i P_RIGHT  ; Carica valore in P_RIGHT (es. 91)
+    sto-i P_LEFT   ; Scrivilo dove puntava P_LEFT (l'8 viene sovrascritto)
+    
+    lod TEMP       ; Recupera il vecchio valore di P_LEFT (l'8)
+    sto-i P_RIGHT  ; Scrivilo dove puntava P_RIGHT
+    ; --- Fine dello Scambio ---
+
+    ; Aggiorna i puntatori
+    lod P_LEFT
+    inc            ; Muovi a destra
+    sto P_LEFT
+    
+    lod P_RIGHT
+    dec            ; Muovi a sinistra
+    sto P_RIGHT
+    
+    jmp ciclo_swap
+
+fine:
+    hlt
+
+; --- Variabili ---
+TEMP:    data
+P_LEFT:  data
+P_RIGHT: data
+
+LISTA1: 8 
+        9 
+        3 
+        21 
+        17 
+        6 
+        2 
+        91 
+        0

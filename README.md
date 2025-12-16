@@ -149,3 +149,11 @@ START_LISTA2: data ; Qui verrà scritta la lista invertita
 Il programma corretto [CREA_LISTA_INVERSA](./CREA_LISTA_INVERSA.txt) e versione Gemini 
 [CREA_LISTA_INVERSA_VERSIONE_GEMINI](./CREA_LISTA_INVERSA_GEMINI.txt) (ERRATA!).
 
+Nuova discussione con Gemini sulle correzioni e proposta soluzione per INVERSA SUL POSTO:
+[CREA_LISTA_INVERSA_IN_PLACE](./CREA_LISTA_INVERSA_IN_PLACE.txt)
+
+Elemento massimo nella lista: [MAX_IN_LISTA](./MAX_IN_LISTA.txt)
+
+Per ordinare gli elementi di una lista: [ORDINA_LISTA](./ORDINA_LISTA.txt)
+
+

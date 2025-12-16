@@ -1,0 +1,97 @@
+; **********************************************************
+; FASE 1: Inizio del Ciclo Esterno (Nuovo Passaggio)
+; **********************************************************
+
+NUOVO_PASSAGGIO:
+    lod-c 0
+    sto SWAP_FLAG  ; Azzera la "bandierina" degli scambi (0 = nessun scambio fatto)
+
+    lod-c LISTA
+    sto P_CURR     ; Riposiziona il puntatore all'inizio della lista
+
+; **********************************************************
+; FASE 2: Ciclo Interno (Confronto a coppie)
+; **********************************************************
+
+CONFRONTA_COPPIA:
+    ; Calcola indirizzo del prossimo elemento (P_NEXT = P_CURR + 1)
+    lod P_CURR
+    inc
+    sto P_NEXT
+
+    ; --- Controllo Fine Lista ---
+    ; Controlliamo se il "prossimo" elemento è lo 0 finale.
+    ; Se sì, il passaggio è finito (non possiamo scambiare l'ultimo numero con lo 0!)
+    lod-i P_NEXT
+    jmz FINE_PASSAGGIO
+
+    ; --- Caricamento Valori ---
+    lod-i P_CURR
+    sto VAL_CURR   ; Valore attuale (Sinistra)
+    
+    lod-i P_NEXT
+    sto VAL_NEXT   ; Valore prossimo (Destra)
+
+    ; --- Confronto (Sinistra - Destra) ---
+    lod VAL_CURR
+    sub VAL_NEXT
+    
+    ; Se (Curr - Next) <= 0, l'ordine è corretto (Curr è più piccolo).
+    jmn NO_SWAP
+    jmz NO_SWAP
+    
+    ; Se siamo qui, il risultato è positivo: Curr > Next.
+    ; DOBBIAMO SCAMBIARE!
+
+; **********************************************************
+; FASE 3: Esecuzione dello Scambio (Swap)
+; **********************************************************
+
+SWAP:
+    ; Scrive VAL_CURR nella posizione NEXT
+    lod VAL_CURR
+    sto-i P_NEXT
+    
+    ; Scrive VAL_NEXT nella posizione CURR
+    lod VAL_NEXT
+    sto-i P_CURR
+    
+    ; Segniamo che abbiamo fatto uno scambio
+    lod-c 1
+    sto SWAP_FLAG
+
+NO_SWAP:
+    ; Avanza il puntatore corrente di uno
+    lod P_CURR
+    inc
+    sto P_CURR
+    jmp CONFRONTA_COPPIA ; Torna a confrontare la prossima coppia
+
+; **********************************************************
+; FASE 4: Controllo Finale
+; **********************************************************
+
+FINE_PASSAGGIO:
+    ; Controlliamo la bandierina SWAP_FLAG.
+    lod SWAP_FLAG
+    jmz FINITO       ; Se è 0, non abbiamo fatto scambi: la lista è ordinata!
+    jmp NUOVO_PASSAGGIO ; Se è 1, abbiamo toccato qualcosa: serve un altro giro.
+
+FINITO:
+    hlt
+
+; --- Variabili ---
+P_CURR:    data ; Puntatore all'elemento corrente (i)
+P_NEXT:    data ; Puntatore all'elemento successivo (i+1)
+VAL_CURR:  data ; Valore temporaneo
+VAL_NEXT:  data ; Valore temporaneo
+SWAP_FLAG: data ; 0 = Ordinato, 1 = Non ancora ordinato
+
+; --- Dati ---
+LISTA: 99 
+        5 
+       12 
+        3 
+       78 
+       15 
+        0 ; Lista disordinata
